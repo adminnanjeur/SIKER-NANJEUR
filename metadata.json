@@ -1,0 +1,10 @@
+{
+  "name": "Remix SIDESA Hadir — Absensi \u0026 Laporan Harian Perangkat Desa",
+  "description": "Aplikasi absensi harian, pencatatan laporan kegiatan perangkat desa, dan pengawasan berbasis peran (RBAC) Admin \u0026 Perangkat Desa.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

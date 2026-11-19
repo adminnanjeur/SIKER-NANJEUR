@@ -1,0 +1,555 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Profil pengguna dan peran RBAC perangkat desa serta admin desa",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Authentication UID"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama lengkap perangkat desa atau admin"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 150,
+          "description": "Alamat email akun Google"
+        },
+        "jabatan": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Jabatan struktural di pemerintah desa"
+        },
+        "nip": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "NIP atau NIAPD perangkat desa"
+        },
+        "unitKerja": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Bidang atau urusan kerja di kantor desa"
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30,
+          "description": "Nomor telepon aktif"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "perangkat"],
+          "description": "Peran akses RBAC sistem"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["aktif", "nonaktif"],
+          "description": "Status keaktifan akun"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan dokumen (server timestamp)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan terakhir (server timestamp)"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "email",
+        "jabatan",
+        "nip",
+        "unitKerja",
+        "phone",
+        "role",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Pra-registrasi data perangkat desa oleh Admin sebelum login pertama",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 150,
+          "description": "Email Google calon perangkat desa"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama lengkap perangkat desa"
+        },
+        "jabatan": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Jabatan di kantor desa"
+        },
+        "nip": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "NIP atau NIAPD"
+        },
+        "unitKerja": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Unit kerja atau bidang"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "perangkat"],
+          "description": "Peran RBAC yang direncanakan"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID admin pembuat pra-registrasi"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan (server timestamp)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "email",
+        "displayName",
+        "jabatan",
+        "nip",
+        "unitKerja",
+        "role",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Catatan absensi harian perangkat desa",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID pemilik absensi"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama perangkat desa saat absen"
+        },
+        "userJabatan": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Jabatan saat absen"
+        },
+        "tanggal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Tanggal absensi format YYYY-MM-DD"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["hadir", "dinas_luar", "izin", "sakit"],
+          "description": "Status kehadiran harian"
+        },
+        "jamMasuk": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8,
+          "pattern": "^(|[0-9]{2}:[0-9]{2}(:[0-9]{2})?)$",
+          "description": "Waktu masuk kerja HH:MM"
+        },
+        "jamPulang": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8,
+          "pattern": "^(|[0-9]{2}:[0-9]{2}(:[0-9]{2})?)$",
+          "description": "Waktu pulang kerja HH:MM"
+        },
+        "lokasiMasuk": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Lokasi atau keterangan titik masuk"
+        },
+        "lokasiPulang": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Lokasi atau keterangan titik pulang"
+        },
+        "catatan": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Catatan tambahan atau alasan izin/dinas luar"
+        },
+        "ketepatan": {
+          "type": "string",
+          "enum": ["tepat_waktu", "terlambat", "izin_resmi"],
+          "description": "Kategori ketepatan waktu hadir"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan (server timestamp)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "userJabatan",
+        "tanggal",
+        "status",
+        "jamMasuk",
+        "jamPulang",
+        "lokasiMasuk",
+        "lokasiPulang",
+        "catatan",
+        "ketepatan",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ActivityReport": {
+      "title": "ActivityReport",
+      "description": "Laporan kegiatan harian perangkat desa beserta status verifikasi pimpinan",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID pembuat laporan"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama pembuat laporan"
+        },
+        "userJabatan": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Jabatan pembuat laporan"
+        },
+        "tanggal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Tanggal pelaksanaan kegiatan YYYY-MM-DD"
+        },
+        "waktuMulai": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam mulai kegiatan HH:MM"
+        },
+        "waktuSelesai": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam selesai kegiatan HH:MM"
+        },
+        "kategori": {
+          "type": "string",
+          "enum": [
+            "Pelayanan Administrasi",
+            "Pemerintahan & Regulasi",
+            "Pembangunan & Infrastruktur",
+            "Pembinaan Kemasyarakatan",
+            "Pemberdayaan Masyarakat",
+            "Keuangan & Aset Desa",
+            "Rapat & Koordinasi"
+          ],
+          "description": "Bidang kategori kegiatan desa"
+        },
+        "judulKegiatan": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150,
+          "description": "Judul ringkas kegiatan harian"
+        },
+        "uraianKegiatan": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 2000,
+          "description": "Rincian pelaksanaan kegiatan"
+        },
+        "lokasi": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 150,
+          "description": "Lokasi pelaksanaan kegiatan"
+        },
+        "outputHasil": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 300,
+          "description": "Hasil atau luaran terukur dari kegiatan"
+        },
+        "statusVerifikasi": {
+          "type": "string",
+          "enum": ["diajukan", "disetujui", "revisi"],
+          "description": "Status verifikasi oleh Admin"
+        },
+        "catatanAdmin": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Catatan arahan atau revisi dari Admin"
+        },
+        "verifiedBy": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128,
+          "description": "UID Admin yang memverifikasi"
+        },
+        "verifiedByName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 100,
+          "description": "Nama Admin yang memverifikasi"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan (server timestamp)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "userJabatan",
+        "tanggal",
+        "waktuMulai",
+        "waktuSelesai",
+        "kategori",
+        "judulKegiatan",
+        "uraianKegiatan",
+        "lokasi",
+        "outputHasil",
+        "statusVerifikasi",
+        "catatanAdmin",
+        "verifiedBy",
+        "verifiedByName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ReminderSchedule": {
+      "title": "ReminderSchedule",
+      "description": "Pengaturan jadwal waktu pengingat otomatis absensi dan batas laporan harian",
+      "type": "object",
+      "properties": {
+        "jamAbsenMasuk": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Waktu pengingat absensi pagi HH:MM"
+        },
+        "jamPengingatSiang": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Waktu pengingat siang HH:MM"
+        },
+        "jamBatasLaporan": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Waktu pengingat batas pengumpulan laporan HH:MM"
+        },
+        "jamAbsenPulang": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Waktu pengingat absen pulang HH:MM"
+        },
+        "aktif": {
+          "type": "boolean",
+          "description": "Status aktif pengingat otomatis"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID admin terakhir yang mengubah jadwal"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "jamAbsenMasuk",
+        "jamPengingatSiang",
+        "jamBatasLaporan",
+        "jamAbsenPulang",
+        "aktif",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "Notifikasi pengingat terjadwal dan hasil verifikasi laporan untuk pengguna",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID penerima notifikasi"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "absen_pagi",
+            "pengingat_siang",
+            "batas_laporan",
+            "absen_pulang",
+            "verifikasi_laporan"
+          ],
+          "description": "Jenis notifikasi"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120,
+          "description": "Judul ringkas notifikasi"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500,
+          "description": "Isi pesan pengingat atau pemberitahuan"
+        },
+        "tanggal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Tanggal notifikasi YYYY-MM-DD"
+        },
+        "isRead": {
+          "type": "boolean",
+          "description": "Status sudah dibaca"
+        },
+        "actionTab": {
+          "type": "string",
+          "enum": ["absensi", "laporan", "ringkasan"],
+          "description": "Tab tujuan saat notifikasi diklik"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan (server timestamp)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "userId",
+        "type",
+        "title",
+        "message",
+        "tanggal",
+        "isRead",
+        "actionTab",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Profil pengguna beserta peran RBAC (admin atau perangkat)"
+    },
+    "/staffInvites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Pra-registrasi data perangkat desa oleh Admin"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Rekam absensi harian dengan ID deterministik {userId}_{tanggal}"
+    },
+    "/activityReports/{reportId}": {
+      "schema": { "$ref": "#/entities/ActivityReport" },
+      "description": "Laporan kegiatan harian perangkat desa"
+    },
+    "/reminderSchedules/{scheduleId}": {
+      "schema": { "$ref": "#/entities/ReminderSchedule" },
+      "description": "Pengaturan jadwal waktu pengingat otomatis kantor desa"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AppNotification" },
+      "description": "Notifikasi terjadwal dan verifikasi untuk masing-masing pengguna"
+    }
+  }
+}
