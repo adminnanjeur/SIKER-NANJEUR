@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  User,
+} from 'firebase/auth';
 import {
   collection,
   deleteDoc,
@@ -76,6 +83,7 @@ export default function App() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const profileBootstrappingRef = useRef(false);
 
   const [myAttendance, setMyAttendance] = useState<AttendanceRecord[]>([]);
   const [myReports, setMyReports] = useState<ActivityReport[]>([]);
@@ -96,6 +104,94 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('ringkasan');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // 0. Check redirect result (if browser used signInWithRedirect fallback)
+  useEffect(() => {
+    void getRedirectResult(auth).catch((err: unknown) => {
+      const code = (err as { code?: string })?.code ?? '';
+      const message = err instanceof Error ? err.message : String(err);
+      if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setAuthError(
+          `Domain "${host}" belum diizinkan di Firebase Authentication. Tambahkan "${host}" di Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else if (code) {
+        setAuthError(`Autentikasi redirect gagal (${code}). Coba gunakan browser Chrome/Safari utama.`);
+      }
+    });
+  }, []);
+
+  const bootstrapUserProfile = useCallback(async (user: User) => {
+    if (profileBootstrappingRef.current) return;
+    profileBootstrappingRef.current = true;
+    setProfileLoading(true);
+    setAuthError(null);
+    const userDocRef = doc(db, 'users', user.uid);
+
+    try {
+      const existingSnap = await getDoc(userDocRef);
+      if (existingSnap.exists()) {
+        setProfile(existingSnap.data() as UserProfile);
+        setProfileLoading(false);
+        return;
+      }
+
+      const emailLower = (user.email ?? '').toLowerCase();
+      let invitedJabatan = JABATAN_OPTIONS[11]; // Staf Pelayanan Desa
+      let invitedUnit = UNIT_KERJA_OPTIONS[4];
+      let invitedNip = '';
+      let invitedName = (user.displayName ?? emailLower.split('@')[0] ?? 'Perangkat Desa').trim();
+
+      try {
+        const inviteQuery = query(
+          collection(db, 'staffInvites'),
+          where('email', '==', emailLower)
+        );
+        const inviteSnap = await getDocs(inviteQuery);
+        if (!inviteSnap.empty) {
+          const firstInvite = inviteSnap.docs[0];
+          const invData = firstInvite.data() as Omit<StaffInvite, 'id'>;
+          invitedJabatan = invData.jabatan || invitedJabatan;
+          invitedUnit = invData.unitKerja || invitedUnit;
+          invitedNip = invData.nip || '';
+          invitedName = invData.displayName || invitedName;
+          await deleteDoc(doc(db, 'staffInvites', firstInvite.id));
+        }
+      } catch {
+        // Invite lookup is optional; ignore if none
+      }
+
+      const isBootAdmin = emailLower === BOOTSTRAPPED_ADMIN_EMAIL && user.emailVerified;
+      const cleanName = invitedName.slice(0, SCHEMA_LIMITS.displayName.max) || 'Perangkat Desa';
+
+      await setDoc(userDocRef, {
+        uid: user.uid,
+        displayName: cleanName.length >= 2 ? cleanName : 'Perangkat Desa',
+        email: user.email ?? emailLower,
+        jabatan: isBootAdmin ? 'Administrator Desa' : invitedJabatan.slice(0, SCHEMA_LIMITS.jabatan.max),
+        nip: invitedNip.slice(0, SCHEMA_LIMITS.nip.max),
+        unitKerja: isBootAdmin ? 'Sekretariat Desa' : invitedUnit.slice(0, SCHEMA_LIMITS.unitKerja.max),
+        phone: '',
+        role: isBootAdmin ? 'admin' : 'perangkat',
+        status: 'aktif',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      const createdSnap = await getDoc(userDocRef);
+      if (createdSnap.exists()) {
+        setProfile(createdSnap.data() as UserProfile);
+      }
+      setProfileLoading(false);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setAuthError(`Login Google berhasil, namun gagal memuat profil dari database: ${detail}`);
+      setProfileLoading(false);
+      console.error('Profile bootstrap error:', error);
+    } finally {
+      profileBootstrappingRef.current = false;
+    }
+  }, []);
+
   // 1. Auth listener & initial profile bootstrap
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -105,6 +201,7 @@ export default function App() {
       if (!user) {
         setProfile(null);
         setProfileLoading(false);
+        profileBootstrappingRef.current = false;
         setMyAttendance([]);
         setMyReports([]);
         setNotifications([]);
@@ -116,61 +213,11 @@ export default function App() {
         return;
       }
 
-      setProfileLoading(true);
-      const userDocRef = doc(db, 'users', user.uid);
-
-      try {
-        const existingSnap = await getDoc(userDocRef);
-        if (!existingSnap.exists()) {
-          const emailLower = (user.email ?? '').toLowerCase();
-          let invitedJabatan = JABATAN_OPTIONS[11]; // Staf Pelayanan Desa
-          let invitedUnit = UNIT_KERJA_OPTIONS[4];
-          let invitedNip = '';
-          let invitedName = (user.displayName ?? emailLower.split('@')[0] ?? 'Perangkat Desa').trim();
-
-          try {
-            const inviteQuery = query(
-              collection(db, 'staffInvites'),
-              where('email', '==', emailLower)
-            );
-            const inviteSnap = await getDocs(inviteQuery);
-            if (!inviteSnap.empty) {
-              const firstInvite = inviteSnap.docs[0];
-              const invData = firstInvite.data() as Omit<StaffInvite, 'id'>;
-              invitedJabatan = invData.jabatan || invitedJabatan;
-              invitedUnit = invData.unitKerja || invitedUnit;
-              invitedNip = invData.nip || '';
-              invitedName = invData.displayName || invitedName;
-              await deleteDoc(doc(db, 'staffInvites', firstInvite.id));
-            }
-          } catch {
-            // Invite lookup is optional; ignore if none
-          }
-
-          const isBootAdmin = emailLower === BOOTSTRAPPED_ADMIN_EMAIL && user.emailVerified;
-          const cleanName = invitedName.slice(0, SCHEMA_LIMITS.displayName.max) || 'Perangkat Desa';
-
-          await setDoc(userDocRef, {
-            uid: user.uid,
-            displayName: cleanName.length >= 2 ? cleanName : 'Perangkat Desa',
-            email: user.email ?? emailLower,
-            jabatan: isBootAdmin ? 'Administrator Desa' : invitedJabatan.slice(0, SCHEMA_LIMITS.jabatan.max),
-            nip: invitedNip.slice(0, SCHEMA_LIMITS.nip.max),
-            unitKerja: isBootAdmin ? 'Sekretariat Desa' : invitedUnit.slice(0, SCHEMA_LIMITS.unitKerja.max),
-            phone: '',
-            role: isBootAdmin ? 'admin' : 'perangkat',
-            status: 'aktif',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
-      }
+      await bootstrapUserProfile(user);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [bootstrapUserProfile]);
 
   // 2. Real-time profile subscription
   useEffect(() => {
@@ -181,12 +228,15 @@ export default function App() {
       (snap) => {
         if (snap.exists()) {
           setProfile(snap.data() as UserProfile);
+          setProfileLoading(false);
+        } else if (!profileBootstrappingRef.current) {
+          setProfileLoading(false);
         }
-        setProfileLoading(false);
       },
       (error) => {
         setProfileLoading(false);
-        handleFirestoreError(error, OperationType.GET, path);
+        setAuthError(`Gagal membaca profil pengguna: ${error.message}`);
+        console.error(`Firestore profile error at ${path}:`, error);
       }
     );
     return () => unsubscribe();
@@ -462,15 +512,39 @@ export default function App() {
     setIsSigningIn(true);
     setAuthError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (cred.user && !profile) {
+        await bootstrapUserProfile(cred.user);
+      }
     } catch (err: unknown) {
+      const code = (err as { code?: string })?.code ?? '';
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('popup-closed-by-user')) {
+      const isTopLevelWindow = typeof window !== 'undefined' && window.self === window.top;
+
+      if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setAuthError(
+          `Domain "${host}" belum terdaftar di Firebase Authentication. Buka Firebase Console → Authentication → Settings → Authorized domains, lalu tambahkan "${host}".`
+        );
+      } else if (code === 'auth/popup-blocked' || message.includes('popup-blocked')) {
+        if (isTopLevelWindow) {
+          try {
+            await signInWithRedirect(auth, googleProvider);
+            return;
+          } catch {
+            setAuthError('Popup login diblokir peramban. Izinkan popup untuk situs ini atau buka lewat Chrome/Safari.');
+          }
+        } else {
+          setAuthError('Popup login diblokir oleh peramban. Izinkan popup untuk situs ini.');
+        }
+      } else if (code === 'auth/popup-closed-by-user' || message.includes('popup-closed-by-user')) {
         setAuthError('Jendela login ditutup sebelum selesai. Silakan coba lagi.');
-      } else if (message.includes('popup-blocked')) {
-        setAuthError('Popup login diblokir oleh peramban. Izinkan popup untuk situs ini.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setAuthError('Metode login Google belum diaktifkan di Firebase Console → Authentication → Sign-in method.');
+      } else if (code === 'auth/network-request-failed') {
+        setAuthError('Koneksi jaringan ke server Google/Firebase gagal. Periksa koneksi internet Anda.');
       } else {
-        setAuthError('Gagal melakukan autentikasi Google. Periksa koneksi Anda.');
+        setAuthError(`Gagal melakukan autentikasi Google (${code || message}).`);
       }
     } finally {
       setIsSigningIn(false);
