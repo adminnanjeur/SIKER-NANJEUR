@@ -34,6 +34,7 @@ import {
   X,
   FilePlus2,
   ShieldAlert,
+  Settings,
 } from 'lucide-react';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './lib/firebase';
 import { getLocalDateISO, getLocalTimeHM, getWorkScheduleForDate } from './lib/dateUtils';
@@ -42,7 +43,12 @@ import {
   AppNotification,
   AttendanceRecord,
   BOOTSTRAPPED_ADMIN_EMAIL,
+  canEvaluateReports,
+  CustomReportCategory,
   DEFAULT_REMINDER_SCHEDULE,
+  DEFAULT_VILLAGE_SETTINGS,
+  hasFullAdminAccess,
+  isKepalaDesaUser,
   JABATAN_OPTIONS,
   NavTab,
   NotificationType,
@@ -51,6 +57,8 @@ import {
   StaffInvite,
   UNIT_KERJA_OPTIONS,
   UserProfile,
+  UserRole,
+  VillageSettings,
 } from './types';
 import { VillageCrest } from './components/VillageBrandMark';
 import { LoginScreen } from './components/LoginScreen';
@@ -62,6 +70,7 @@ import { ProfileTab } from './components/ProfileTab';
 import { AdminReportsTab } from './components/AdminReportsTab';
 import { AdminAttendanceTab } from './components/AdminAttendanceTab';
 import { AdminUsersTab } from './components/AdminUsersTab';
+import { AdminSettingsTab } from './components/AdminSettingsTab';
 import { RoleText } from './components/StatusText';
 
 const TAB_LABELS: Record<NavTab, string> = {
@@ -70,9 +79,10 @@ const TAB_LABELS: Record<NavTab, string> = {
   laporan: 'Laporan Harian',
   notifikasi: 'Notifikasi & Pengingat',
   profil: 'Profil Saya',
-  'admin-laporan': 'Semua Laporan',
+  'admin-laporan': 'Laporan & Penilaian Pimpinan',
   'admin-absensi': 'Rekap Absensi Desa',
   'admin-pengguna': 'Manajemen Pengguna',
+  'admin-pengaturan': 'Pengaturan Sistem',
 };
 
 export default function App() {
@@ -92,6 +102,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notificationsLoaded, setNotificationsLoaded] = useState(false);
   const [schedule, setSchedule] = useState<ReminderSchedule>(DEFAULT_REMINDER_SCHEDULE);
+  const [villageSettings, setVillageSettings] = useState<VillageSettings>(DEFAULT_VILLAGE_SETTINGS);
+  const [customCategories, setCustomCategories] = useState<CustomReportCategory[]>([]);
   const [toastNotif, setToastNotif] = useState<AppNotification | null>(null);
   const seenToastIdsRef = useRef<Set<string>>(new Set());
 
@@ -140,21 +152,38 @@ export default function App() {
       let invitedUnit = UNIT_KERJA_OPTIONS[4];
       let invitedNip = '';
       let invitedName = (user.displayName ?? emailLower.split('@')[0] ?? 'Perangkat Desa').trim();
+      let invitedRole: UserRole = 'perangkat';
+      let invitedStatusKepegawaian: 'perangkat_desa' | 'staf_desa' = 'perangkat_desa';
+      let matchedInviteId: string | null = null;
 
       try {
-        const inviteQuery = query(
-          collection(db, 'staffInvites'),
-          where('email', '==', emailLower)
-        );
-        const inviteSnap = await getDocs(inviteQuery);
-        if (!inviteSnap.empty) {
-          const firstInvite = inviteSnap.docs[0];
-          const invData = firstInvite.data() as Omit<StaffInvite, 'id'>;
+        const directInviteSnap = emailLower ? await getDoc(doc(db, 'staffInvites', emailLower)) : null;
+        if (directInviteSnap && directInviteSnap.exists()) {
+          const invData = directInviteSnap.data() as Omit<StaffInvite, 'id'>;
           invitedJabatan = invData.jabatan || invitedJabatan;
           invitedUnit = invData.unitKerja || invitedUnit;
           invitedNip = invData.nip || '';
           invitedName = invData.displayName || invitedName;
-          await deleteDoc(doc(db, 'staffInvites', firstInvite.id));
+          invitedRole = invData.role || 'perangkat';
+          invitedStatusKepegawaian = invData.statusKepegawaian ?? 'perangkat_desa';
+          matchedInviteId = directInviteSnap.id;
+        } else {
+          const inviteQuery = query(
+            collection(db, 'staffInvites'),
+            where('email', '==', emailLower)
+          );
+          const inviteSnap = await getDocs(inviteQuery);
+          if (!inviteSnap.empty) {
+            const firstInvite = inviteSnap.docs[0];
+            const invData = firstInvite.data() as Omit<StaffInvite, 'id'>;
+            invitedJabatan = invData.jabatan || invitedJabatan;
+            invitedUnit = invData.unitKerja || invitedUnit;
+            invitedNip = invData.nip || '';
+            invitedName = invData.displayName || invitedName;
+            invitedRole = invData.role || 'perangkat';
+            invitedStatusKepegawaian = invData.statusKepegawaian ?? 'perangkat_desa';
+            matchedInviteId = firstInvite.id;
+          }
         }
       } catch {
         // Invite lookup is optional; ignore if none
@@ -171,11 +200,20 @@ export default function App() {
         nip: invitedNip.slice(0, SCHEMA_LIMITS.nip.max),
         unitKerja: isBootAdmin ? 'Sekretariat Desa' : invitedUnit.slice(0, SCHEMA_LIMITS.unitKerja.max),
         phone: '',
-        role: isBootAdmin ? 'admin' : 'perangkat',
+        role: isBootAdmin ? 'admin' : invitedRole,
         status: 'aktif',
+        statusKepegawaian: invitedStatusKepegawaian,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      if (matchedInviteId) {
+        try {
+          await deleteDoc(doc(db, 'staffInvites', matchedInviteId));
+        } catch {
+          // Optional cleanup
+        }
+      }
 
       const createdSnap = await getDoc(userDocRef);
       if (createdSnap.exists()) {
@@ -206,6 +244,8 @@ export default function App() {
         setMyReports([]);
         setNotifications([]);
         setNotificationsLoaded(false);
+        setVillageSettings(DEFAULT_VILLAGE_SETTINGS);
+        setCustomCategories([]);
         setAllUsers([]);
         setAllInvites([]);
         setAllAttendance([]);
@@ -323,17 +363,75 @@ export default function App() {
       }
     );
 
+    const unsubSettings = onSnapshot(
+      doc(db, 'villageSettings', 'default'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as Partial<VillageSettings>;
+          const rawUnits =
+            Array.isArray(data.unitKerjaOptions) && data.unitKerjaOptions.length > 0
+              ? data.unitKerjaOptions
+              : DEFAULT_VILLAGE_SETTINGS.unitKerjaOptions;
+          const normalizedUnits = rawUnits.flatMap((u) =>
+            u === 'Seksi Pelayanan & Kesejahteraan'
+              ? ['Seksi Pelayanan', 'Seksi Kesejahteraan']
+              : [u]
+          );
+          setVillageSettings({
+            ...DEFAULT_VILLAGE_SETTINGS,
+            ...data,
+            jabatanOptions:
+              Array.isArray(data.jabatanOptions) && data.jabatanOptions.length > 0
+                ? data.jabatanOptions
+                : DEFAULT_VILLAGE_SETTINGS.jabatanOptions,
+            unitKerjaOptions: Array.from(new Set(normalizedUnits)),
+            reportCategories:
+              Array.isArray(data.reportCategories) && data.reportCategories.length > 0
+                ? data.reportCategories
+                : DEFAULT_VILLAGE_SETTINGS.reportCategories,
+          });
+        } else {
+          setVillageSettings(DEFAULT_VILLAGE_SETTINGS);
+        }
+      },
+      () => {
+        setVillageSettings(DEFAULT_VILLAGE_SETTINGS);
+      }
+    );
+
+    const customCatQuery = query(
+      collection(db, 'customReportCategories'),
+      where('isShared', '==', true)
+    );
+    const unsubCustomCats = onSnapshot(
+      customCatQuery,
+      (snap) => {
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<CustomReportCategory, 'id'>) }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+        setCustomCategories(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'customReportCategories');
+      }
+    );
+
     return () => {
       unsubAtt();
       unsubRep();
       unsubNotif();
       unsubSchedule();
+      unsubSettings();
+      unsubCustomCats();
     };
   }, [authReady, authUser, profile?.uid]);
 
-  // 4. Admin-only listeners (RBAC guarded)
+  // 4. Admin, Sekretaris Desa, & Kepala Desa listeners (RBAC guarded)
   useEffect(() => {
-    if (!authReady || !authUser || profile?.role !== 'admin' || profile?.status !== 'aktif') {
+    const fullAdmin = hasFullAdminAccess(profile);
+    const evaluator = canEvaluateReports(profile);
+
+    if (!authReady || !authUser || !evaluator) {
       setAllUsers([]);
       setAllInvites([]);
       setAllAttendance([]);
@@ -343,34 +441,38 @@ export default function App() {
 
     setAdminDataLoading(true);
 
-    const unsubUsers = onSnapshot(
-      collection(db, 'users'),
-      (snap) => {
-        const list = snap.docs
-          .map((d) => d.data() as UserProfile)
-          .sort((a, b) => a.displayName.localeCompare(b.displayName));
-        setAllUsers(list);
-        setAdminDataLoading(false);
-      },
-      (error) => {
-        setAdminDataLoading(false);
-        handleFirestoreError(error, OperationType.LIST, 'users');
-      }
-    );
+    const unsubUsers = fullAdmin
+      ? onSnapshot(
+          collection(db, 'users'),
+          (snap) => {
+            const list = snap.docs
+              .map((d) => d.data() as UserProfile)
+              .sort((a, b) => a.displayName.localeCompare(b.displayName));
+            setAllUsers(list);
+            setAdminDataLoading(false);
+          },
+          (error) => {
+            setAdminDataLoading(false);
+            handleFirestoreError(error, OperationType.LIST, 'users');
+          }
+        )
+      : () => {};
 
-    const unsubInvites = onSnapshot(
-      collection(db, 'staffInvites'),
-      (snap) => {
-        const list = snap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<StaffInvite, 'id'>),
-        }));
-        setAllInvites(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'staffInvites');
-      }
-    );
+    const unsubInvites = fullAdmin
+      ? onSnapshot(
+          collection(db, 'staffInvites'),
+          (snap) => {
+            const list = snap.docs.map((d) => ({
+              id: d.id,
+              ...(d.data() as Omit<StaffInvite, 'id'>),
+            }));
+            setAllInvites(list);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.LIST, 'staffInvites');
+          }
+        )
+      : () => {};
 
     const unsubAllAtt = onSnapshot(
       collection(db, 'attendance'),
@@ -395,8 +497,14 @@ export default function App() {
             return cmpDate !== 0 ? cmpDate : b.waktuMulai.localeCompare(a.waktuMulai);
           });
         setAllReports(list);
+        if (!fullAdmin) {
+          setAdminDataLoading(false);
+        }
       },
       (error) => {
+        if (!fullAdmin) {
+          setAdminDataLoading(false);
+        }
         handleFirestoreError(error, OperationType.LIST, 'activityReports');
       }
     );
@@ -407,22 +515,47 @@ export default function App() {
       unsubAllAtt();
       unsubAllRep();
     };
-  }, [authReady, authUser, profile?.role, profile?.status]);
+  }, [authReady, authUser, profile?.role, profile?.jabatan, profile?.status]);
 
-  // Enforce RBAC tab guard if role changes in real time
+  // Enforce RBAC tab guard if role/jabatan changes in real time
   useEffect(() => {
-    if (profile && profile.role !== 'admin' && activeTab.startsWith('admin-')) {
+    if (!profile) return;
+    const fullAdmin = hasFullAdminAccess(profile);
+    const evaluator = canEvaluateReports(profile);
+
+    if (activeTab === 'admin-laporan' && !evaluator) {
+      setActiveTab('ringkasan');
+    } else if (
+      (activeTab === 'admin-absensi' || activeTab === 'admin-pengguna' || activeTab === 'admin-pengaturan') &&
+      !fullAdmin
+    ) {
+      setActiveTab('ringkasan');
+    }
+
+    if (profile.role === 'admin' && (activeTab === 'absensi' || activeTab === 'laporan')) {
       setActiveTab('ringkasan');
     }
   }, [profile, activeTab]);
 
-  // 5. Automated Scheduled Notification Checker
+  // 5. Automated Scheduled Notification Checker (Mon–Fri regular workdays; weekend is flexible)
   const runSchedulerCheck = useCallback(async () => {
-    if (!authUser || !profile || profile.status !== 'aktif' || !schedule.aktif || !notificationsLoaded || personalDataLoading) {
+    if (
+      !authUser ||
+      !profile ||
+      profile.status !== 'aktif' ||
+      profile.role === 'admin' ||
+      !schedule.aktif ||
+      !notificationsLoaded ||
+      personalDataLoading
+    ) {
       return;
     }
 
     const todayISO = getLocalDateISO();
+    const todaySchedule = getWorkScheduleForDate(todayISO, villageSettings);
+    if (todaySchedule.isWeekend) {
+      return;
+    }
     const nowHM = getLocalTimeHM();
     const todayAtt = myAttendance.find((a) => a.tanggal === todayISO);
     const todayRep = myReports.filter((r) => r.tanggal === todayISO);
@@ -479,10 +612,10 @@ export default function App() {
       );
     }
 
-    const todaySchedule = getWorkScheduleForDate(todayISO);
+    const checkSchedule = getWorkScheduleForDate(todayISO, villageSettings);
     const effectiveCheckOutTime =
-      todaySchedule.isFriday && schedule.jamAbsenPulang === '16:00'
-        ? todaySchedule.jamPulang
+      checkSchedule.isFriday && schedule.jamAbsenPulang === villageSettings.jamPulangNormal
+        ? checkSchedule.jamPulang
         : schedule.jamAbsenPulang;
 
     if (
@@ -498,7 +631,7 @@ export default function App() {
         'absensi'
       );
     }
-  }, [authUser, profile, schedule, notificationsLoaded, personalDataLoading, myAttendance, myReports, notifications]);
+  }, [authUser, profile, schedule, villageSettings, notificationsLoaded, personalDataLoading, myAttendance, myReports, notifications]);
 
   useEffect(() => {
     void runSchedulerCheck();
@@ -603,7 +736,10 @@ export default function App() {
     );
   }
 
-  const isAdmin = profile.role === 'admin';
+  const isFullAdmin = hasFullAdminAccess(profile);
+  const isEvaluator = canEvaluateReports(profile);
+  const isKepalaDesa = isKepalaDesaUser(profile);
+  const isManagementOnly = profile.role === 'admin';
   const unreadNotifCount = notifications.filter((n) => !n.isRead).length;
   const todayISO = getLocalDateISO();
   const todayAttendance = myAttendance.find((a) => a.tanggal === todayISO);
@@ -614,19 +750,30 @@ export default function App() {
     label: string;
     icon: React.ComponentType<{ className?: string }>;
     count?: number;
-  }[] = [
-    { id: 'ringkasan', label: 'Ringkasan', icon: LayoutDashboard },
-    { id: 'absensi', label: 'Absensi Saya', icon: Clock },
-    { id: 'laporan', label: 'Laporan Harian', icon: FileText },
-    { id: 'notifikasi', label: 'Notifikasi', icon: Bell, count: unreadNotifCount },
-    { id: 'profil', label: 'Profil Saya', icon: UserIcon },
-  ];
+  }[] = isManagementOnly
+    ? [
+        { id: 'ringkasan', label: 'Ringkasan', icon: LayoutDashboard },
+        { id: 'notifikasi', label: 'Notifikasi', icon: Bell, count: unreadNotifCount },
+        { id: 'profil', label: 'Profil Saya', icon: UserIcon },
+      ]
+    : [
+        { id: 'ringkasan', label: 'Ringkasan', icon: LayoutDashboard },
+        { id: 'absensi', label: 'Absensi Saya', icon: Clock },
+        { id: 'laporan', label: 'Laporan Harian', icon: FileText },
+        { id: 'notifikasi', label: 'Notifikasi', icon: Bell, count: unreadNotifCount },
+        { id: 'profil', label: 'Profil Saya', icon: UserIcon },
+      ];
 
-  const adminNav: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'admin-laporan', label: 'Semua Laporan', icon: ClipboardCheck },
-    { id: 'admin-absensi', label: 'Rekap Absensi Desa', icon: CalendarRange },
-    { id: 'admin-pengguna', label: 'Manajemen Pengguna', icon: Users },
-  ];
+  const adminNav: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = isFullAdmin
+    ? [
+        { id: 'admin-laporan', label: 'Laporan & Penilaian', icon: ClipboardCheck },
+        { id: 'admin-absensi', label: 'Rekap Absensi Desa', icon: CalendarRange },
+        { id: 'admin-pengguna', label: 'Manajemen Pengguna', icon: Users },
+        { id: 'admin-pengaturan', label: 'Pengaturan Sistem', icon: Settings },
+      ]
+    : isKepalaDesa
+    ? [{ id: 'admin-laporan', label: 'Penilaian Pimpinan', icon: ClipboardCheck }]
+    : [];
 
   const navigateTo = (tab: NavTab) => {
     setActiveTab(tab);
@@ -642,7 +789,7 @@ export default function App() {
             <VillageCrest className="w-8 h-8 shrink-0" />
             <div className="min-w-0">
               <p className="text-sm font-bold tracking-tight text-slate-900 truncate">SIKER NANJEUR</p>
-              <p className="text-xs text-slate-500 truncate">Desa Cipeundeuy</p>
+              <p className="text-xs text-slate-500 truncate">{villageSettings.namaDesa}</p>
             </div>
           </div>
           <button
@@ -686,10 +833,12 @@ export default function App() {
           })}
         </nav>
 
-        {/* Admin RBAC Menu */}
-        {isAdmin && (
-          <nav className="space-y-1 pt-2 border-t border-slate-200" aria-label="Menu Admin Desa">
-            <p className="px-3 pb-1 text-xs font-medium text-teal-700">Administrasi Desa (Admin)</p>
+        {/* Admin / Sekdes / Kepala Desa Menu */}
+        {adminNav.length > 0 && (
+          <nav className="space-y-1 pt-2 border-t border-slate-200" aria-label="Menu Pimpinan & Admin Desa">
+            <p className="px-3 pb-1 text-xs font-medium text-teal-700">
+              {isFullAdmin ? 'Administrasi & Penilaian' : 'Penilaian Pimpinan'}
+            </p>
             {adminNav.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
@@ -719,7 +868,7 @@ export default function App() {
           <p className="text-sm font-semibold text-slate-900 truncate">{profile.displayName}</p>
           <p className="text-xs text-slate-500 truncate">{profile.jabatan}</p>
           <div className="pt-1">
-            <RoleText role={profile.role} />
+            <RoleText role={profile.role} jabatan={profile.jabatan} />
           </div>
         </div>
         <button
@@ -769,14 +918,43 @@ export default function App() {
               <Menu className="w-5 h-5" />
             </button>
             <div className="flex items-center gap-2 text-sm truncate">
-              <span className="text-slate-500 hidden sm:inline">Desa Cipeundeuy</span>
+              <span className="text-slate-500 hidden sm:inline">{villageSettings.namaDesa}</span>
               <span className="text-slate-300 hidden sm:inline" aria-hidden="true">/</span>
               <h1 className="font-semibold text-slate-900 truncate">{TAB_LABELS[activeTab]}</h1>
             </div>
           </div>
 
           <div className="shrink-0">
-            {activeTab === 'laporan' ? (
+            {isEvaluator ? (
+              activeTab === 'admin-laporan' && isFullAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('admin-pengaturan')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  Pengaturan Sistem
+                </button>
+              ) : activeTab === 'admin-laporan' && !isManagementOnly ? (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('laporan')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FilePlus2 className="w-3.5 h-3.5" />
+                  Tulis Laporan
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('admin-laporan')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5" />
+                  Penilaian Laporan
+                </button>
+              )
+            ) : activeTab === 'laporan' ? (
               <button
                 type="button"
                 onClick={() => navigateTo('absensi')}
@@ -807,24 +985,28 @@ export default function App() {
               allAttendance={allAttendance}
               allReports={allReports}
               allUsers={allUsers}
+              villageSettings={villageSettings}
               onNavigate={navigateTo}
               onQuickCheckIn={() => navigateTo('absensi')}
             />
           )}
 
-          {activeTab === 'absensi' && (
+          {activeTab === 'absensi' && !isManagementOnly && (
             <AttendanceTab
               profile={profile}
               records={myAttendance}
               loading={personalDataLoading}
+              villageSettings={villageSettings}
             />
           )}
 
-          {activeTab === 'laporan' && (
+          {activeTab === 'laporan' && !isManagementOnly && (
             <ActivityReportsTab
               profile={profile}
               reports={myReports}
               loading={personalDataLoading}
+              villageSettings={villageSettings}
+              customCategories={customCategories}
             />
           )}
 
@@ -835,36 +1017,60 @@ export default function App() {
               schedule={schedule}
               todayAttendance={todayAttendance}
               todayReports={todayReports}
+              villageSettings={villageSettings}
               onNavigate={navigateTo}
               onRunSchedulerCheck={runSchedulerCheck}
             />
           )}
 
-          {activeTab === 'profil' && <ProfileTab profile={profile} />}
-
-          {activeTab === 'admin-laporan' && isAdmin && (
-            <AdminReportsTab
-              adminProfile={profile}
-              reports={allReports}
-              users={allUsers}
-              loading={adminDataLoading}
+          {activeTab === 'profil' && (
+            <ProfileTab
+              profile={profile}
+              jabatanOptions={villageSettings.jabatanOptions}
+              unitKerjaOptions={villageSettings.unitKerjaOptions}
             />
           )}
 
-          {activeTab === 'admin-absensi' && isAdmin && (
+          {activeTab === 'admin-laporan' && isEvaluator && (
+            <AdminReportsTab
+              adminProfile={profile}
+              reports={allReports}
+              attendance={allAttendance}
+              users={allUsers}
+              loading={adminDataLoading}
+              villageSettings={villageSettings}
+              customCategories={customCategories}
+              canManageReports={isFullAdmin}
+            />
+          )}
+
+          {activeTab === 'admin-absensi' && isFullAdmin && (
             <AdminAttendanceTab
               attendance={allAttendance}
               users={allUsers}
               loading={adminDataLoading}
+              villageSettings={villageSettings}
             />
           )}
 
-          {activeTab === 'admin-pengguna' && isAdmin && (
+          {activeTab === 'admin-pengguna' && isFullAdmin && (
             <AdminUsersTab
               adminProfile={profile}
               users={allUsers}
               invites={allInvites}
               loading={adminDataLoading}
+              jabatanOptions={villageSettings.jabatanOptions}
+              unitKerjaOptions={villageSettings.unitKerjaOptions}
+            />
+          )}
+
+          {activeTab === 'admin-pengaturan' && isFullAdmin && (
+            <AdminSettingsTab
+              adminProfile={profile}
+              villageSettings={villageSettings}
+              reminderSchedule={schedule}
+              customCategories={customCategories}
+              onNavigate={navigateTo}
             />
           )}
         </main>

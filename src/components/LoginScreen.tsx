@@ -40,7 +40,7 @@ export function LoginScreen({ onSignIn, authError, isSigningIn }: LoginScreenPro
               Absensi &amp; Laporan Kegiatan Harian
             </h1>
             <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-              Masuk menggunakan akun Google resmi Anda untuk mencatat kehadiran harian, menyusun laporan kerja, atau memverifikasi kinerja perangkat desa.
+              Masuk menggunakan akun Google resmi Anda untuk mencatat kehadiran harian, menyusun laporan kerja, atau memberikan Penilaian Pimpinan atas kinerja perangkat desa.
             </p>
           </div>
 

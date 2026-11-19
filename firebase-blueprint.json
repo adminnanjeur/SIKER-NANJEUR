@@ -59,6 +59,11 @@
           "enum": ["aktif", "nonaktif"],
           "description": "Status keaktifan akun"
         },
+        "statusKepegawaian": {
+          "type": "string",
+          "enum": ["perangkat_desa", "staf_desa"],
+          "description": "Status kepegawaian: Perangkat Desa atau Staf Desa"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -124,6 +129,11 @@
           "type": "string",
           "enum": ["admin", "perangkat"],
           "description": "Peran RBAC yang direncanakan"
+        },
+        "statusKepegawaian": {
+          "type": "string",
+          "enum": ["perangkat_desa", "staf_desa"],
+          "description": "Status kepegawaian awal: Perangkat Desa atau Staf Desa"
         },
         "createdBy": {
           "type": "string",
@@ -302,16 +312,9 @@
         },
         "kategori": {
           "type": "string",
-          "enum": [
-            "Pelayanan Administrasi",
-            "Pemerintahan & Regulasi",
-            "Pembangunan & Infrastruktur",
-            "Pembinaan Kemasyarakatan",
-            "Pemberdayaan Masyarakat",
-            "Keuangan & Aset Desa",
-            "Rapat & Koordinasi"
-          ],
-          "description": "Bidang kategori kegiatan desa"
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Bidang kategori kegiatan desa (dapat dikelola Admin)"
         },
         "judulKegiatan": {
           "type": "string",
@@ -339,26 +342,46 @@
         },
         "statusVerifikasi": {
           "type": "string",
-          "enum": ["diajukan", "disetujui", "revisi"],
-          "description": "Status verifikasi oleh Admin"
+          "enum": [
+            "belum_dinilai",
+            "sangat_baik",
+            "baik",
+            "cukup",
+            "perlu_perbaikan",
+            "diajukan",
+            "disetujui",
+            "revisi"
+          ],
+          "description": "Kategori penilaian pimpinan (Sangat Baik, Baik, Cukup, Perlu Perbaikan, atau Belum Dinilai)"
         },
         "catatanAdmin": {
           "type": "string",
           "minLength": 0,
           "maxLength": 500,
-          "description": "Catatan arahan atau revisi dari Admin"
+          "description": "Keterangan penilaian pimpinan"
         },
         "verifiedBy": {
           "type": "string",
           "minLength": 0,
           "maxLength": 128,
-          "description": "UID Admin yang memverifikasi"
+          "description": "UID pimpinan (Admin, Sekretaris Desa, atau Kepala Desa) yang menilai"
         },
         "verifiedByName": {
           "type": "string",
           "minLength": 0,
           "maxLength": 100,
-          "description": "Nama Admin yang memverifikasi"
+          "description": "Nama pimpinan yang menilai"
+        },
+        "jenisTugas": {
+          "type": "string",
+          "enum": ["reguler", "direktif_pimpinan", "manual_luar_jam"],
+          "description": "Jenis pelaksanaan laporan: tugas reguler, tugas direktif pimpinan, atau tambahan manual di luar jam/hari kerja"
+        },
+        "keteranganTugas": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150,
+          "description": "Keterangan pemberi tugas direktif pimpinan atau catatan tambahan manual"
         },
         "createdAt": {
           "type": "string",
@@ -470,7 +493,8 @@
             "pengingat_siang",
             "batas_laporan",
             "absen_pulang",
-            "verifikasi_laporan"
+            "verifikasi_laporan",
+            "penilaian_laporan"
           ],
           "description": "Jenis notifikasi"
         },
@@ -524,6 +548,171 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "VillageSettings": {
+      "title": "VillageSettings",
+      "description": "Pengaturan global desa, koordinat geofence kantor, jam kerja, serta daftar master jabatan, unit kerja, dan kategori laporan",
+      "type": "object",
+      "properties": {
+        "namaDesa": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama resmi desa"
+        },
+        "kecamatan": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama kecamatan"
+        },
+        "alamatKantor": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 150,
+          "description": "Nama atau alamat kantor desa"
+        },
+        "officeLat": {
+          "type": "number",
+          "description": "Latitude titik koordinat kantor desa"
+        },
+        "officeLng": {
+          "type": "number",
+          "description": "Longitude titik koordinat kantor desa"
+        },
+        "attendanceRadiusMeters": {
+          "type": "number",
+          "description": "Radius maksimal absensi kantor dalam meter"
+        },
+        "jamMasukBatas": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Batas jam masuk tepat waktu HH:MM"
+        },
+        "jamIstirahatMulaiNormal": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam mulai istirahat Senin-Kamis HH:MM"
+        },
+        "jamIstirahatSelesaiNormal": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam selesai istirahat Senin-Kamis HH:MM"
+        },
+        "jamPulangNormal": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam pulang kerja Senin-Kamis HH:MM"
+        },
+        "jamIstirahatMulaiJumat": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam mulai istirahat hari Jumat HH:MM"
+        },
+        "jamIstirahatSelesaiJumat": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam selesai istirahat hari Jumat HH:MM"
+        },
+        "jamPulangJumat": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Jam pulang kerja hari Jumat HH:MM"
+        },
+        "jabatanOptions": {
+          "type": "array",
+          "description": "Daftar pilihan jabatan perangkat desa"
+        },
+        "unitKerjaOptions": {
+          "type": "array",
+          "description": "Daftar pilihan unit kerja desa"
+        },
+        "reportCategories": {
+          "type": "array",
+          "description": "Daftar kategori laporan kegiatan harian"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID admin terakhir yang mengubah pengaturan"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan (server timestamp)"
+        }
+      },
+      "required": [
+        "namaDesa",
+        "kecamatan",
+        "alamatKantor",
+        "officeLat",
+        "officeLng",
+        "attendanceRadiusMeters",
+        "jamMasukBatas",
+        "jamIstirahatMulaiNormal",
+        "jamIstirahatSelesaiNormal",
+        "jamPulangNormal",
+        "jamIstirahatMulaiJumat",
+        "jamIstirahatSelesaiJumat",
+        "jamPulangJumat",
+        "jabatanOptions",
+        "unitKerjaOptions",
+        "reportCategories",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "CustomReportCategory": {
+      "title": "CustomReportCategory",
+      "description": "Kategori laporan kegiatan tambahan yang dibuat secara manual oleh pengguna aktif",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Nama kategori laporan kegiatan"
+        },
+        "isShared": {
+          "type": "boolean",
+          "description": "Penanda kategori tersedia di daftar pilihan laporan harian"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID pengguna pembuat kategori"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan (server timestamp)"
+        }
+      },
+      "required": [
+        "name",
+        "isShared",
+        "createdBy",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -547,9 +736,17 @@
       "schema": { "$ref": "#/entities/ReminderSchedule" },
       "description": "Pengaturan jadwal waktu pengingat otomatis kantor desa"
     },
+    "/villageSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/VillageSettings" },
+      "description": "Pengaturan identitas desa, geofence GPS, jam kerja, dan master daftar pilihan"
+    },
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/AppNotification" },
       "description": "Notifikasi terjadwal dan verifikasi untuk masing-masing pengguna"
+    },
+    "/customReportCategories/{categoryId}": {
+      "schema": { "$ref": "#/entities/CustomReportCategory" },
+      "description": "Kategori laporan kegiatan tambahan yang dapat ditambah manual oleh semua pengguna aktif"
     }
   }
 }

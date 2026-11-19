@@ -2,14 +2,27 @@ import React, { useState } from 'react';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { CheckCircle2, AlertCircle, Shield, Save } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { JABATAN_OPTIONS, SCHEMA_LIMITS, UNIT_KERJA_OPTIONS, UserProfile } from '../types';
-import { AccountStatusText, RoleText } from './StatusText';
+import {
+  hasFullAdminAccess,
+  isKepalaDesaUser,
+  JABATAN_OPTIONS,
+  SCHEMA_LIMITS,
+  UNIT_KERJA_OPTIONS,
+  UserProfile,
+} from '../types';
+import { AccountStatusText, EmploymentStatusText, RoleText } from './StatusText';
 
 interface ProfileTabProps {
   profile: UserProfile;
+  jabatanOptions?: string[];
+  unitKerjaOptions?: string[];
 }
 
-export function ProfileTab({ profile }: ProfileTabProps) {
+export function ProfileTab({
+  profile,
+  jabatanOptions = JABATAN_OPTIONS,
+  unitKerjaOptions = UNIT_KERJA_OPTIONS,
+}: ProfileTabProps) {
   const [displayName, setDisplayName] = useState(profile.displayName);
   const [jabatan, setJabatan] = useState(profile.jabatan);
   const [nip, setNip] = useState(profile.nip);
@@ -17,6 +30,14 @@ export function ProfileTab({ profile }: ProfileTabProps) {
   const [phone, setPhone] = useState(profile.phone);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const isFullAdmin = hasFullAdminAccess(profile);
+  const isKepalaDesa = isKepalaDesaUser(profile);
+  const selectableJabatanOptions = isFullAdmin
+    ? jabatanOptions
+    : jabatanOptions.filter(
+        (j) => (j !== 'Sekretaris Desa' && j !== 'Kepala Desa') || j === profile.jabatan
+      );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,18 +138,18 @@ export function ProfileTab({ profile }: ProfileTabProps) {
             </label>
             <select
               id="prof-jabatan"
-              value={JABATAN_OPTIONS.includes(jabatan) ? jabatan : 'custom'}
+              value={selectableJabatanOptions.includes(jabatan) ? jabatan : 'custom'}
               onChange={(e) => {
                 if (e.target.value !== 'custom') setJabatan(e.target.value);
               }}
               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
             >
-              {JABATAN_OPTIONS.map((j) => (
+              {selectableJabatanOptions.map((j) => (
                 <option key={j} value={j}>
                   {j}
                 </option>
               ))}
-              {!JABATAN_OPTIONS.includes(jabatan) && <option value="custom">{jabatan}</option>}
+              {!selectableJabatanOptions.includes(jabatan) && <option value="custom">{jabatan}</option>}
             </select>
           </div>
 
@@ -138,18 +159,18 @@ export function ProfileTab({ profile }: ProfileTabProps) {
             </label>
             <select
               id="prof-unit"
-              value={UNIT_KERJA_OPTIONS.includes(unitKerja) ? unitKerja : 'custom'}
+              value={unitKerjaOptions.includes(unitKerja) ? unitKerja : 'custom'}
               onChange={(e) => {
                 if (e.target.value !== 'custom') setUnitKerja(e.target.value);
               }}
               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
             >
-              {UNIT_KERJA_OPTIONS.map((u) => (
+              {unitKerjaOptions.map((u) => (
                 <option key={u} value={u}>
                   {u}
                 </option>
               ))}
-              {!UNIT_KERJA_OPTIONS.includes(unitKerja) && <option value="custom">{unitKerja}</option>}
+              {!unitKerjaOptions.includes(unitKerja) && <option value="custom">{unitKerja}</option>}
             </select>
           </div>
 
@@ -209,7 +230,11 @@ export function ProfileTab({ profile }: ProfileTabProps) {
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Peran Sistem</span>
-            <RoleText role={profile.role} />
+            <RoleText role={profile.role} jabatan={profile.jabatan} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600">Status Pegawai</span>
+            <EmploymentStatusText statusKepegawaian={profile.statusKepegawaian} role={profile.role} />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Status Akun</span>
@@ -221,16 +246,29 @@ export function ProfileTab({ profile }: ProfileTabProps) {
           <p className="text-xs font-semibold text-slate-700">Cakupan Izin Anda:</p>
           {profile.role === 'admin' ? (
             <ul className="space-y-1.5 text-xs text-slate-600 list-disc pl-4">
-              <li>Melihat dan memverifikasi seluruh laporan kegiatan perangkat desa.</li>
-              <li>Memantau rekap absensi harian dan bulanan seluruh staf desa.</li>
-              <li>Mengelola profil, jabatan, status aktif, dan peran RBAC pengguna.</li>
-              <li>Mencatat absensi dan laporan pribadi.</li>
+              <li>Akun khusus manajemen sistem (tidak diwajibkan absensi maupun membuat laporan harian).</li>
+              <li>Melihat, menambah, mengedit, dan memberikan Penilaian Pimpinan (Sangat Baik, Baik, Cukup, Perlu Perbaikan).</li>
+              <li>Mengekspor rekap laporan harian, mingguan (Senin–Minggu), dan bulanan serta mencetak rekap gabungan.</li>
+              <li>Mengatur identitas desa, koordinat GPS, jam kerja, jabatan, unit kerja, kategori, dan akun RBAC.</li>
+            </ul>
+          ) : isFullAdmin ? (
+            <ul className="space-y-1.5 text-xs text-slate-600 list-disc pl-4">
+              <li>Akses manajemen penuh yang setara dengan Admin Desa (laporan, absensi desa, pengguna RBAC, &amp; pengaturan sistem).</li>
+              <li>Memberikan Penilaian Pimpinan kapan saja dan mengekspor laporan harian, mingguan (Senin–Minggu), serta bulanan.</li>
+              <li>Mencatat absensi pribadi (05:30–08:00 tepat waktu, pulang maks 21:00) dan LKH hari ini pukul 15:00–21:00 WIB.</li>
+            </ul>
+          ) : isKepalaDesa ? (
+            <ul className="space-y-1.5 text-xs text-slate-600 list-disc pl-4">
+              <li>Memberikan Penilaian Pimpinan (Sangat Baik, Baik, Cukup, Perlu Perbaikan) pada laporan seluruh perangkat &amp; staf desa kapan saja.</li>
+              <li>Mengekspor rekap laporan harian, mingguan (Senin–Minggu), dan bulanan serta mencetak rekap gabungan.</li>
+              <li>Mencatat absensi pribadi (05:30–08:00 tepat waktu, maks 21:00) dan menyusun LKH hari ini pukul 15:00–21:00 WIB.</li>
             </ul>
           ) : (
             <ul className="space-y-1.5 text-xs text-slate-600 list-disc pl-4">
-              <li>Mencatat absensi masuk, pulang, dinas luar, dan izin milik sendiri.</li>
-              <li>Membuat, mengedit, dan menghapus laporan harian pribadi selama belum disetujui.</li>
-              <li>Tidak dapat mengakses data absensi, laporan, maupun PII perangkat lain.</li>
+              <li>Mencatat absensi masuk tepat waktu pukul 05:30–08:00 WIB dan pulang maksimal pukul 21:00 WIB (fleksibel Sabtu &amp; Minggu).</li>
+              <li>Mengisi laporan harian (reguler, direktif pimpinan, maupun tambahan manual) pukul 15:00–21:00 WIB sesuai tanggal hari ini.</li>
+              <li>Mengekspor laporan pribadi harian, mingguan (Senin–Minggu), dan bulanan dari data laporan harian.</li>
+              <li>Mengedit atau menghapus laporan pribadi yang belum dinilai atau berstatus Perlu Perbaikan.</li>
             </ul>
           )}
         </div>

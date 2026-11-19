@@ -27,6 +27,10 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidInviteId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 150 && id.matches('^[a-zA-Z0-9_\\.@+\\-]+$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -54,6 +58,28 @@ service cloud.firestore {
       );
     }
 
+    function isSekdes() {
+      return isVerifiedEmail() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.jabatan == 'Sekretaris Desa';
+    }
+
+    function isAdminOrSekdes() {
+      return isAdmin() || isSekdes();
+    }
+
+    function isKepalaDesa() {
+      return isVerifiedEmail() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.jabatan == 'Kepala Desa';
+    }
+
+    function isEvaluator() {
+      return isAdminOrSekdes() || isKepalaDesa();
+    }
+
     function isValidDateString(val) {
       return val is string && val.size() == 10 && val.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
@@ -76,7 +102,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'uid', 'displayName', 'email', 'jabatan', 'nip',
-          'unitKerja', 'phone', 'role', 'status', 'createdAt', 'updatedAt'
+          'unitKerja', 'phone', 'role', 'status', 'statusKepegawaian', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.uid) &&
         data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 100 &&
@@ -87,6 +113,7 @@ service cloud.firestore {
         data.phone is string && data.phone.size() <= 30 &&
         data.role in ['admin', 'perangkat'] &&
         data.status in ['aktif', 'nonaktif'] &&
+        (!('statusKepegawaian' in data) || data.statusKepegawaian in ['perangkat_desa', 'staf_desa']) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -98,7 +125,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'email', 'displayName', 'jabatan', 'nip',
-          'unitKerja', 'role', 'createdBy', 'createdAt', 'updatedAt'
+          'unitKerja', 'role', 'statusKepegawaian', 'createdBy', 'createdAt', 'updatedAt'
         ]) &&
         data.email is string && data.email.size() >= 5 && data.email.size() <= 150 &&
         data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 100 &&
@@ -106,6 +133,7 @@ service cloud.firestore {
         data.nip is string && data.nip.size() <= 40 &&
         data.unitKerja is string && data.unitKerja.size() >= 2 && data.unitKerja.size() <= 80 &&
         data.role in ['admin', 'perangkat'] &&
+        (!('statusKepegawaian' in data) || data.statusKepegawaian in ['perangkat_desa', 'staf_desa']) &&
         isValidId(data.createdBy) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -148,7 +176,8 @@ service cloud.firestore {
           'userId', 'userName', 'userJabatan', 'tanggal',
           'waktuMulai', 'waktuSelesai', 'kategori', 'judulKegiatan',
           'uraianKegiatan', 'lokasi', 'outputHasil', 'statusVerifikasi',
-          'catatanAdmin', 'verifiedBy', 'verifiedByName', 'createdAt', 'updatedAt'
+          'catatanAdmin', 'verifiedBy', 'verifiedByName',
+          'jenisTugas', 'keteranganTugas', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.userId) &&
         data.userName is string && data.userName.size() >= 2 && data.userName.size() <= 100 &&
@@ -156,23 +185,20 @@ service cloud.firestore {
         isValidDateString(data.tanggal) &&
         isValidTimeString(data.waktuMulai) &&
         isValidTimeString(data.waktuSelesai) &&
-        data.kategori in [
-          'Pelayanan Administrasi',
-          'Pemerintahan & Regulasi',
-          'Pembangunan & Infrastruktur',
-          'Pembinaan Kemasyarakatan',
-          'Pemberdayaan Masyarakat',
-          'Keuangan & Aset Desa',
-          'Rapat & Koordinasi'
-        ] &&
+        data.kategori is string && data.kategori.size() >= 2 && data.kategori.size() <= 80 &&
         data.judulKegiatan is string && data.judulKegiatan.size() >= 3 && data.judulKegiatan.size() <= 150 &&
         data.uraianKegiatan is string && data.uraianKegiatan.size() >= 5 && data.uraianKegiatan.size() <= 2000 &&
         data.lokasi is string && data.lokasi.size() >= 2 && data.lokasi.size() <= 150 &&
         data.outputHasil is string && data.outputHasil.size() >= 2 && data.outputHasil.size() <= 300 &&
-        data.statusVerifikasi in ['diajukan', 'disetujui', 'revisi'] &&
+        data.statusVerifikasi in [
+          'belum_dinilai', 'sangat_baik', 'baik', 'cukup', 'perlu_perbaikan',
+          'diajukan', 'disetujui', 'revisi'
+        ] &&
         data.catatanAdmin is string && data.catatanAdmin.size() <= 500 &&
         data.verifiedBy is string && data.verifiedBy.size() <= 128 &&
         data.verifiedByName is string && data.verifiedByName.size() <= 100 &&
+        (!('jenisTugas' in data) || data.jenisTugas in ['reguler', 'direktif_pimpinan', 'manual_luar_jam']) &&
+        (!('keteranganTugas' in data) || (data.keteranganTugas is string && data.keteranganTugas.size() <= 150)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -195,6 +221,46 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidVillageSettings(data) {
+      return data.keys().hasAll([
+          'namaDesa', 'kecamatan', 'alamatKantor', 'officeLat', 'officeLng',
+          'attendanceRadiusMeters', 'jamMasukBatas',
+          'jamIstirahatMulaiNormal', 'jamIstirahatSelesaiNormal', 'jamPulangNormal',
+          'jamIstirahatMulaiJumat', 'jamIstirahatSelesaiJumat', 'jamPulangJumat',
+          'jabatanOptions', 'unitKerjaOptions', 'reportCategories',
+          'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'namaDesa', 'kecamatan', 'alamatKantor', 'officeLat', 'officeLng',
+          'attendanceRadiusMeters', 'jamMasukBatas',
+          'jamIstirahatMulaiNormal', 'jamIstirahatSelesaiNormal', 'jamPulangNormal',
+          'jamIstirahatMulaiJumat', 'jamIstirahatSelesaiJumat', 'jamPulangJumat',
+          'jabatanOptions', 'unitKerjaOptions', 'reportCategories',
+          'updatedBy', 'updatedAt'
+        ]) &&
+        data.namaDesa is string && data.namaDesa.size() >= 2 && data.namaDesa.size() <= 100 &&
+        data.kecamatan is string && data.kecamatan.size() >= 2 && data.kecamatan.size() <= 100 &&
+        data.alamatKantor is string && data.alamatKantor.size() >= 2 && data.alamatKantor.size() <= 150 &&
+        data.officeLat is number && data.officeLat >= -90 && data.officeLat <= 90 &&
+        data.officeLng is number && data.officeLng >= -180 && data.officeLng <= 180 &&
+        data.attendanceRadiusMeters is number && data.attendanceRadiusMeters >= 10 && data.attendanceRadiusMeters <= 50000 &&
+        isValidTimeString(data.jamMasukBatas) &&
+        isValidTimeString(data.jamIstirahatMulaiNormal) &&
+        isValidTimeString(data.jamIstirahatSelesaiNormal) &&
+        isValidTimeString(data.jamPulangNormal) &&
+        isValidTimeString(data.jamIstirahatMulaiJumat) &&
+        isValidTimeString(data.jamIstirahatSelesaiJumat) &&
+        isValidTimeString(data.jamPulangJumat) &&
+        data.jabatanOptions is list && data.jabatanOptions.size() >= 1 && data.jabatanOptions.size() <= 50 &&
+        data.jabatanOptions[0] is string && data.jabatanOptions[0].size() >= 2 && data.jabatanOptions[0].size() <= 80 &&
+        data.unitKerjaOptions is list && data.unitKerjaOptions.size() >= 1 && data.unitKerjaOptions.size() <= 30 &&
+        data.unitKerjaOptions[0] is string && data.unitKerjaOptions[0].size() >= 2 && data.unitKerjaOptions[0].size() <= 80 &&
+        data.reportCategories is list && data.reportCategories.size() >= 1 && data.reportCategories.size() <= 30 &&
+        data.reportCategories[0] is string && data.reportCategories[0].size() >= 2 && data.reportCategories[0].size() <= 80 &&
+        isValidId(data.updatedBy) &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidNotification(data) {
       return data.keys().hasAll([
           'userId', 'type', 'title', 'message', 'tanggal',
@@ -205,7 +271,7 @@ service cloud.firestore {
           'isRead', 'actionTab', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.userId) &&
-        data.type in ['absen_pagi', 'pengingat_siang', 'batas_laporan', 'absen_pulang', 'verifikasi_laporan'] &&
+        data.type in ['absen_pagi', 'pengingat_siang', 'batas_laporan', 'absen_pulang', 'verifikasi_laporan', 'penilaian_laporan'] &&
         data.title is string && data.title.size() >= 3 && data.title.size() <= 120 &&
         data.message is string && data.message.size() >= 5 && data.message.size() <= 500 &&
         isValidDateString(data.tanggal) &&
@@ -215,12 +281,21 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidCustomCategory(data) {
+      return data.keys().hasAll(['name', 'isShared', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'isShared', 'createdBy', 'createdAt']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+        data.isShared is bool &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp;
+    }
+
     // =========================================================
     // Collection: /users/{userId} (PII Isolated)
     // =========================================================
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdminOrSekdes());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdminOrSekdes());
 
       allow create: if isVerifiedEmail() &&
         isValidId(userId) &&
@@ -235,10 +310,24 @@ service cloud.firestore {
             incoming().status == 'aktif' &&
             (
               (isBootstrappedAdmin() && incoming().role == 'admin') ||
-              incoming().role == 'perangkat'
+              (
+                incoming().role == 'perangkat' &&
+                (
+                  !(incoming().jabatan in ['Sekretaris Desa', 'Kepala Desa']) ||
+                  (
+                    exists(/databases/$(database)/documents/staffInvites/$(request.auth.token.email)) &&
+                    get(/databases/$(database)/documents/staffInvites/$(request.auth.token.email)).data.jabatan == incoming().jabatan
+                  )
+                )
+              ) ||
+              (
+                incoming().role == 'admin' &&
+                exists(/databases/$(database)/documents/staffInvites/$(request.auth.token.email)) &&
+                get(/databases/$(database)/documents/staffInvites/$(request.auth.token.email)).data.role == 'admin'
+              )
             )
           ) ||
-          isAdmin()
+          isAdminOrSekdes()
         );
 
       allow update: if isVerifiedEmail() &&
@@ -250,9 +339,9 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         (
           (
-            isAdmin() &&
+            isAdminOrSekdes() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'displayName', 'jabatan', 'nip', 'unitKerja', 'phone', 'role', 'status', 'updatedAt'
+              'displayName', 'jabatan', 'nip', 'unitKerja', 'phone', 'role', 'status', 'statusKepegawaian', 'updatedAt'
             ])
           ) ||
           (
@@ -260,42 +349,46 @@ service cloud.firestore {
             existing().status == 'aktif' &&
             incoming().role == existing().role &&
             incoming().status == existing().status &&
+            (
+              incoming().jabatan == existing().jabatan ||
+              !(incoming().jabatan in ['Sekretaris Desa', 'Kepala Desa'])
+            ) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'displayName', 'jabatan', 'nip', 'unitKerja', 'phone', 'updatedAt'
             ])
           )
         );
 
-      allow delete: if isAdmin() && isValidId(userId) && userId != request.auth.uid;
+      allow delete: if isAdminOrSekdes() && isValidId(userId) && userId != request.auth.uid;
     }
 
     // =========================================================
     // Collection: /staffInvites/{inviteId}
     // =========================================================
     match /staffInvites/{inviteId} {
-      allow get: if isVerifiedEmail() && isValidId(inviteId) && (
-        isAdmin() || resource.data.email == request.auth.token.email
+      allow get: if isVerifiedEmail() && isValidInviteId(inviteId) && (
+        isAdminOrSekdes() || resource.data.email == request.auth.token.email
       );
       allow list: if isVerifiedEmail() && (
-        isAdmin() || resource.data.email == request.auth.token.email
+        isAdminOrSekdes() || resource.data.email == request.auth.token.email
       );
-      allow create: if isAdmin() &&
-        isValidId(inviteId) &&
+      allow create: if isAdminOrSekdes() &&
+        isValidInviteId(inviteId) &&
         isValidStaffInvite(incoming()) &&
         incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() &&
-        isValidId(inviteId) &&
+      allow update: if isAdminOrSekdes() &&
+        isValidInviteId(inviteId) &&
         isValidStaffInvite(incoming()) &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'email', 'displayName', 'jabatan', 'nip', 'unitKerja', 'role', 'updatedAt'
+          'email', 'displayName', 'jabatan', 'nip', 'unitKerja', 'role', 'statusKepegawaian', 'updatedAt'
         ]);
-      allow delete: if isVerifiedEmail() && isValidId(inviteId) && (
-        isAdmin() || resource.data.email == request.auth.token.email
+      allow delete: if isVerifiedEmail() && isValidInviteId(inviteId) && (
+        isAdminOrSekdes() || resource.data.email == request.auth.token.email
       );
     }
 
@@ -304,21 +397,26 @@ service cloud.firestore {
     // =========================================================
     match /attendance/{attendanceId} {
       allow get: if isSignedIn() && isValidId(attendanceId) && (
-        resource.data.userId == request.auth.uid || isAdmin()
+        resource.data.userId == request.auth.uid || isEvaluator()
       );
       allow list: if isSignedIn() && (
-        resource.data.userId == request.auth.uid || isAdmin()
+        resource.data.userId == request.auth.uid || isEvaluator()
       );
 
       allow create: if isVerifiedEmail() &&
         isValidId(attendanceId) &&
         isValidAttendance(incoming()) &&
-        incoming().userId == request.auth.uid &&
-        attendanceId == (request.auth.uid + '_' + incoming().tanggal) &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif' &&
+        attendanceId == (incoming().userId + '_' + incoming().tanggal) &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        (
+          isAdminOrSekdes() ||
+          (
+            incoming().userId == request.auth.uid &&
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif'
+          )
+        );
 
       allow update: if isVerifiedEmail() &&
         isValidId(attendanceId) &&
@@ -329,7 +427,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         (
           (
-            isAdmin() &&
+            isAdminOrSekdes() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'userName', 'userJabatan', 'status', 'jamMasuk', 'jamPulang',
               'lokasiMasuk', 'lokasiPulang', 'catatan', 'ketepatan', 'updatedAt'
@@ -345,7 +443,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isAdmin() && isValidId(attendanceId);
+      allow delete: if isAdminOrSekdes() && isValidId(attendanceId);
     }
 
     // =========================================================
@@ -353,24 +451,29 @@ service cloud.firestore {
     // =========================================================
     match /activityReports/{reportId} {
       allow get: if isSignedIn() && isValidId(reportId) && (
-        resource.data.userId == request.auth.uid || isAdmin()
+        resource.data.userId == request.auth.uid || isEvaluator()
       );
       allow list: if isSignedIn() && (
-        resource.data.userId == request.auth.uid || isAdmin()
+        resource.data.userId == request.auth.uid || isEvaluator()
       );
 
       allow create: if isVerifiedEmail() &&
         isValidId(reportId) &&
         isValidActivityReport(incoming()) &&
-        incoming().userId == request.auth.uid &&
-        incoming().statusVerifikasi == 'diajukan' &&
-        incoming().catatanAdmin == '' &&
-        incoming().verifiedBy == '' &&
-        incoming().verifiedByName == '' &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif' &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        (
+          isAdminOrSekdes() ||
+          (
+            incoming().userId == request.auth.uid &&
+            incoming().statusVerifikasi in ['belum_dinilai', 'diajukan'] &&
+            incoming().catatanAdmin == '' &&
+            incoming().verifiedBy == '' &&
+            incoming().verifiedByName == '' &&
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif'
+          )
+        );
 
       allow update: if isVerifiedEmail() &&
         isValidId(reportId) &&
@@ -380,23 +483,30 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         (
           (
-            isAdmin() &&
+            isAdminOrSekdes() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'statusVerifikasi', 'catatanAdmin', 'verifiedBy', 'verifiedByName',
               'tanggal', 'waktuMulai', 'waktuSelesai', 'kategori',
-              'judulKegiatan', 'uraianKegiatan', 'lokasi', 'outputHasil', 'updatedAt'
+              'judulKegiatan', 'uraianKegiatan', 'lokasi', 'outputHasil',
+              'jenisTugas', 'keteranganTugas', 'updatedAt'
+            ])
+          ) ||
+          (
+            isKepalaDesa() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'statusVerifikasi', 'catatanAdmin', 'verifiedBy', 'verifiedByName', 'updatedAt'
             ])
           ) ||
           (
             existing().userId == request.auth.uid &&
-            existing().statusVerifikasi != 'disetujui' &&
-            incoming().statusVerifikasi == 'diajukan' &&
+            existing().statusVerifikasi in ['belum_dinilai', 'perlu_perbaikan', 'diajukan', 'revisi'] &&
+            incoming().statusVerifikasi == 'belum_dinilai' &&
             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif' &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'tanggal', 'waktuMulai', 'waktuSelesai', 'kategori',
               'judulKegiatan', 'uraianKegiatan', 'lokasi', 'outputHasil',
-              'statusVerifikasi', 'updatedAt'
+              'jenisTugas', 'keteranganTugas', 'statusVerifikasi', 'updatedAt'
             ])
           )
         );
@@ -404,8 +514,11 @@ service cloud.firestore {
       allow delete: if isVerifiedEmail() &&
         isValidId(reportId) &&
         (
-          isAdmin() ||
-          (resource.data.userId == request.auth.uid && resource.data.statusVerifikasi != 'disetujui')
+          isAdminOrSekdes() ||
+          (
+            resource.data.userId == request.auth.uid &&
+            resource.data.statusVerifikasi in ['belum_dinilai', 'perlu_perbaikan', 'diajukan', 'revisi']
+          )
         );
     }
 
@@ -414,9 +527,21 @@ service cloud.firestore {
     // =========================================================
     match /reminderSchedules/{scheduleId} {
       allow get: if isSignedIn() && isValidId(scheduleId);
-      allow create, update: if isAdmin() &&
+      allow create, update: if isAdminOrSekdes() &&
         isValidId(scheduleId) &&
         isValidReminderSchedule(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time;
+    }
+
+    // =========================================================
+    // Collection: /villageSettings/{settingId}
+    // =========================================================
+    match /villageSettings/{settingId} {
+      allow get: if isSignedIn() && isValidId(settingId);
+      allow create, update: if isAdminOrSekdes() &&
+        isValidId(settingId) &&
+        isValidVillageSettings(incoming()) &&
         incoming().updatedBy == request.auth.uid &&
         incoming().updatedAt == request.time;
     }
@@ -434,7 +559,7 @@ service cloud.firestore {
         incoming().isRead == false &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (incoming().userId == request.auth.uid || isAdmin());
+        (incoming().userId == request.auth.uid || isEvaluator());
 
       allow update: if isVerifiedEmail() &&
         isValidId(notificationId) &&
@@ -448,6 +573,29 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']);
 
       allow delete: if isVerifiedEmail() && isValidId(notificationId) && resource.data.userId == request.auth.uid;
+    }
+
+    // =========================================================
+    // Collection: /customReportCategories/{categoryId}
+    // =========================================================
+    match /customReportCategories/{categoryId} {
+      allow get: if isSignedIn() && isValidId(categoryId);
+      allow list: if isSignedIn() && (
+        resource.data.isShared == true ||
+        resource.data.createdBy == request.auth.uid ||
+        isEvaluator()
+      );
+      allow create: if isVerifiedEmail() &&
+        isValidId(categoryId) &&
+        isValidCustomCategory(incoming()) &&
+        incoming().isShared == true &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'aktif';
+      allow delete: if isVerifiedEmail() && isValidId(categoryId) && (
+        resource.data.createdBy == request.auth.uid || isAdminOrSekdes()
+      );
     }
   }
 }

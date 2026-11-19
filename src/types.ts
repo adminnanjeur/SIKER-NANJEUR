@@ -1,24 +1,28 @@
 export type UserRole = 'admin' | 'perangkat';
 export type AccountStatus = 'aktif' | 'nonaktif';
+export type EmploymentStatus = 'perangkat_desa' | 'staf_desa';
 export type AttendanceStatus = 'hadir' | 'dinas_luar' | 'izin' | 'sakit';
 export type PunctualityStatus = 'tepat_waktu' | 'terlambat' | 'izin_resmi';
-export type VerificationStatus = 'diajukan' | 'disetujui' | 'revisi';
+export type VerificationStatus =
+  | 'belum_dinilai'
+  | 'sangat_baik'
+  | 'baik'
+  | 'cukup'
+  | 'perlu_perbaikan'
+  | 'diajukan'
+  | 'disetujui'
+  | 'revisi';
+export type TaskExecutionType = 'reguler' | 'direktif_pimpinan' | 'manual_luar_jam';
 
-export type ReportCategory =
-  | 'Pelayanan Administrasi'
-  | 'Pemerintahan & Regulasi'
-  | 'Pembangunan & Infrastruktur'
-  | 'Pembinaan Kemasyarakatan'
-  | 'Pemberdayaan Masyarakat'
-  | 'Keuangan & Aset Desa'
-  | 'Rapat & Koordinasi';
+export type ReportCategory = string;
 
 export type NotificationType =
   | 'absen_pagi'
   | 'pengingat_siang'
   | 'batas_laporan'
   | 'absen_pulang'
-  | 'verifikasi_laporan';
+  | 'verifikasi_laporan'
+  | 'penilaian_laporan';
 
 export type NavTab =
   | 'ringkasan'
@@ -28,7 +32,8 @@ export type NavTab =
   | 'profil'
   | 'admin-laporan'
   | 'admin-absensi'
-  | 'admin-pengguna';
+  | 'admin-pengguna'
+  | 'admin-pengaturan';
 
 export interface ReminderSchedule {
   jamAbsenMasuk: string;
@@ -53,10 +58,21 @@ export interface AppNotification {
   updatedAt: unknown;
 }
 
+export const ATTENDANCE_TIME_WINDOW = {
+  start: '05:30',
+  onTimeEnd: '08:00',
+  maxEnd: '21:00',
+} as const;
+
+export const DAILY_REPORT_TIME_WINDOW = {
+  start: '15:00',
+  end: '21:00',
+} as const;
+
 export const DEFAULT_REMINDER_SCHEDULE: ReminderSchedule = {
   jamAbsenMasuk: '07:30',
   jamPengingatSiang: '13:00',
-  jamBatasLaporan: '15:30',
+  jamBatasLaporan: '15:00',
   jamAbsenPulang: '16:00',
   aktif: true,
 };
@@ -71,6 +87,7 @@ export interface UserProfile {
   phone: string;
   role: UserRole;
   status: AccountStatus;
+  statusKepegawaian?: EmploymentStatus;
   createdAt: unknown;
   updatedAt: unknown;
 }
@@ -83,6 +100,7 @@ export interface StaffInvite {
   nip: string;
   unitKerja: string;
   role: UserRole;
+  statusKepegawaian?: EmploymentStatus;
   createdBy: string;
   createdAt: unknown;
   updatedAt: unknown;
@@ -122,17 +140,117 @@ export interface ActivityReport {
   catatanAdmin: string;
   verifiedBy: string;
   verifiedByName: string;
+  jenisTugas?: TaskExecutionType;
+  keteranganTugas?: string;
   createdAt: unknown;
   updatedAt: unknown;
 }
 
+export const TASK_TYPE_LABELS: Record<TaskExecutionType, string> = {
+  reguler: 'Tugas Reguler (Hari & Jam Kerja)',
+  direktif_pimpinan: 'Tugas Direktif dari Pimpinan',
+  manual_luar_jam: 'Tambahan Manual (Sabtu / Minggu / Luar Jam Kerja)',
+};
+
+export function hasFullAdminAccess(
+  profile?: Pick<UserProfile, 'role' | 'jabatan' | 'status'> | null
+): boolean {
+  return Boolean(
+    profile &&
+      profile.status === 'aktif' &&
+      (profile.role === 'admin' || profile.jabatan === 'Sekretaris Desa')
+  );
+}
+
+export function isKepalaDesaUser(
+  profile?: Pick<UserProfile, 'jabatan' | 'status'> | null
+): boolean {
+  return Boolean(profile && profile.status === 'aktif' && profile.jabatan === 'Kepala Desa');
+}
+
+export function canEvaluateReports(
+  profile?: Pick<UserProfile, 'role' | 'jabatan' | 'status'> | null
+): boolean {
+  return hasFullAdminAccess(profile) || isKepalaDesaUser(profile);
+}
+
+export function isReportUnrated(status: VerificationStatus): boolean {
+  return status === 'belum_dinilai' || status === 'diajukan';
+}
+
+export function isReportNeedsImprovement(status: VerificationStatus): boolean {
+  return status === 'perlu_perbaikan' || status === 'revisi';
+}
+
+export function isReportEditableByStaff(status: VerificationStatus): boolean {
+  return isReportUnrated(status) || isReportNeedsImprovement(status);
+}
+
+export function getAssessmentLabel(status: VerificationStatus): string {
+  switch (status) {
+    case 'sangat_baik':
+      return 'Sangat Baik';
+    case 'baik':
+    case 'disetujui':
+      return 'Baik';
+    case 'cukup':
+      return 'Cukup';
+    case 'perlu_perbaikan':
+    case 'revisi':
+      return 'Perlu Perbaikan';
+    case 'belum_dinilai':
+    case 'diajukan':
+    default:
+      return 'Belum Dinilai';
+  }
+}
+
+export interface CustomReportCategory {
+  id: string;
+  name: string;
+  isShared: boolean;
+  createdBy: string;
+  createdAt: unknown;
+}
+
+export function toCustomCategoryId(name: string): string {
+  const clean = name.trim().toLowerCase();
+  const slug = clean.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return `cat_${slug || 'manual'}_${hash.toString(36)}`.slice(0, 120);
+}
+
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'adminnanjeurdesacipeundeuy@gmail.com';
+
+export interface VillageSettings {
+  namaDesa: string;
+  kecamatan: string;
+  alamatKantor: string;
+  officeLat: number;
+  officeLng: number;
+  attendanceRadiusMeters: number;
+  jamMasukBatas: string;
+  jamIstirahatMulaiNormal: string;
+  jamIstirahatSelesaiNormal: string;
+  jamPulangNormal: string;
+  jamIstirahatMulaiJumat: string;
+  jamIstirahatSelesaiJumat: string;
+  jamPulangJumat: string;
+  jabatanOptions: string[];
+  unitKerjaOptions: string[];
+  reportCategories: string[];
+  updatedBy?: string;
+  updatedAt?: unknown;
+}
 
 export const VILLAGE_INFO = {
   namaDesa: 'Desa Cipeundeuy',
   kecamatan: 'Kecamatan Cipeundeuy',
   alamatKantor: 'Kantor Desa Cipeundeuy',
-  jamMasukBatas: '07:30',
+  jamMasukBatas: '08:00',
   jamPulangMinimal: '16:00',
   jamPulangJumat: '16:30',
   officeLat: -6.738423051820891,
@@ -171,7 +289,8 @@ export const UNIT_KERJA_OPTIONS: string[] = [
   'Sekretariat Desa',
   'Urusan Keuangan & Perencanaan',
   'Seksi Pemerintahan',
-  'Seksi Pelayanan & Kesejahteraan',
+  'Seksi Pelayanan',
+  'Seksi Kesejahteraan',
   'Kewilayahan / Dusun',
 ];
 
@@ -192,6 +311,26 @@ export const SCHEMA_LIMITS = {
   uraianKegiatan: { min: 5, max: 2000 },
   outputHasil: { min: 2, max: 300 },
   catatanAdmin: { min: 0, max: 500 },
+  keteranganTugas: { min: 0, max: 150 },
   notifTitle: { min: 3, max: 120 },
   notifMessage: { min: 5, max: 500 },
 } as const;
+
+export const DEFAULT_VILLAGE_SETTINGS: VillageSettings = {
+  namaDesa: VILLAGE_INFO.namaDesa,
+  kecamatan: VILLAGE_INFO.kecamatan,
+  alamatKantor: VILLAGE_INFO.alamatKantor,
+  officeLat: VILLAGE_INFO.officeLat,
+  officeLng: VILLAGE_INFO.officeLng,
+  attendanceRadiusMeters: VILLAGE_INFO.attendanceRadiusMeters,
+  jamMasukBatas: VILLAGE_INFO.jamMasukBatas,
+  jamIstirahatMulaiNormal: '12:00',
+  jamIstirahatSelesaiNormal: '13:00',
+  jamPulangNormal: VILLAGE_INFO.jamPulangMinimal,
+  jamIstirahatMulaiJumat: '11:30',
+  jamIstirahatSelesaiJumat: '13:00',
+  jamPulangJumat: VILLAGE_INFO.jamPulangJumat,
+  jabatanOptions: [...JABATAN_OPTIONS],
+  unitKerjaOptions: [...UNIT_KERJA_OPTIONS],
+  reportCategories: [...REPORT_CATEGORIES],
+};

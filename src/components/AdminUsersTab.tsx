@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, X, ShieldCheck } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   AccountStatus,
   BOOTSTRAPPED_ADMIN_EMAIL,
+  EmploymentStatus,
   JABATAN_OPTIONS,
   SCHEMA_LIMITS,
   StaffInvite,
@@ -12,16 +13,25 @@ import {
   UserProfile,
   UserRole,
 } from '../types';
-import { AccountStatusText, RoleText } from './StatusText';
+import { AccountStatusText, EmploymentStatusText, RoleText } from './StatusText';
 
 interface AdminUsersTabProps {
   adminProfile: UserProfile;
   users: UserProfile[];
   invites: StaffInvite[];
+  jabatanOptions?: string[];
+  unitKerjaOptions?: string[];
   loading: boolean;
 }
 
-export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUsersTabProps) {
+export function AdminUsersTab({
+  adminProfile,
+  users,
+  invites,
+  jabatanOptions = JABATAN_OPTIONS,
+  unitKerjaOptions = UNIT_KERJA_OPTIONS,
+  loading,
+}: AdminUsersTabProps) {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editForm, setEditForm] = useState({
     displayName: '',
@@ -31,18 +41,21 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
     phone: '',
     role: 'perangkat' as UserRole,
     status: 'aktif' as AccountStatus,
+    statusKepegawaian: 'perangkat_desa' as EmploymentStatus,
   });
 
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     email: '',
     displayName: '',
-    jabatan: JABATAN_OPTIONS[2],
+    jabatan: jabatanOptions[0] ?? JABATAN_OPTIONS[2],
     nip: '',
-    unitKerja: UNIT_KERJA_OPTIONS[1],
+    unitKerja: unitKerjaOptions[0] ?? UNIT_KERJA_OPTIONS[1],
     role: 'perangkat' as UserRole,
+    statusKepegawaian: 'perangkat_desa' as EmploymentStatus,
   });
 
+  const [confirmDeleteUid, setConfirmDeleteUid] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -56,6 +69,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
       phone: u.phone,
       role: u.role,
       status: u.status,
+      statusKepegawaian: u.statusKepegawaian ?? 'perangkat_desa',
     });
     setFeedback(null);
   };
@@ -84,6 +98,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
         phone: editForm.phone.trim().slice(0, SCHEMA_LIMITS.phone.max),
         role: editForm.role,
         status: editForm.status,
+        statusKepegawaian: editForm.statusKepegawaian,
         updatedAt: serverTimestamp(),
       });
       setFeedback({
@@ -110,32 +125,34 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
     setSaving(true);
     setFeedback(null);
     try {
-      await addDoc(collection(db, 'staffInvites'), {
+      await setDoc(doc(db, 'staffInvites', emailClean), {
         email: emailClean,
         displayName: nameClean,
         jabatan: inviteForm.jabatan.trim().slice(0, SCHEMA_LIMITS.jabatan.max),
         nip: inviteForm.nip.trim().slice(0, SCHEMA_LIMITS.nip.max),
         unitKerja: inviteForm.unitKerja.trim().slice(0, SCHEMA_LIMITS.unitKerja.max),
         role: inviteForm.role,
+        statusKepegawaian: inviteForm.statusKepegawaian,
         createdBy: adminProfile.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       setFeedback({
         type: 'success',
-        text: `Pra-registrasi untuk ${nameClean} (${emailClean}) tersimpan. Profil akan terisi otomatis saat login pertama.`,
+        text: `Pra-registrasi untuk ${nameClean} (${emailClean}) tersimpan. Profil dan hak akses akan aktif otomatis saat login pertama.`,
       });
       setShowInviteForm(false);
       setInviteForm({
         email: '',
         displayName: '',
-        jabatan: JABATAN_OPTIONS[2],
+        jabatan: jabatanOptions[0] ?? JABATAN_OPTIONS[2],
         nip: '',
-        unitKerja: UNIT_KERJA_OPTIONS[1],
+        unitKerja: unitKerjaOptions[0] ?? UNIT_KERJA_OPTIONS[1],
         role: 'perangkat',
+        statusKepegawaian: 'perangkat_desa',
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'staffInvites');
+      handleFirestoreError(error, OperationType.CREATE, `staffInvites/${emailClean}`);
     } finally {
       setSaving(false);
     }
@@ -150,13 +167,30 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
     }
   };
 
+  const handleDeleteUser = async (targetUser: UserProfile) => {
+    if (targetUser.uid === adminProfile.uid || targetUser.email === BOOTSTRAPPED_ADMIN_EMAIL) {
+      setFeedback({ type: 'error', text: 'Akun Admin utama atau akun Anda yang sedang aktif tidak dapat dihapus.' });
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'users', targetUser.uid));
+      setConfirmDeleteUid(null);
+      if (editingUser?.uid === targetUser.uid) {
+        setEditingUser(null);
+      }
+      setFeedback({ type: 'success', text: `Akun ${targetUser.displayName} berhasil dihapus.` });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${targetUser.uid}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-white border border-slate-200 rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Manajemen Pengguna &amp; Peran (RBAC)</h2>
           <p className="text-xs text-slate-500">
-            Atur peran Admin dan Perangkat Desa, perbarui jabatan struktural, atau nonaktifkan akun staf.
+            Admin &amp; Sekretaris Desa memiliki akses manajemen penuh + Penilaian Pimpinan; Kepala Desa memiliki akses Penilaian Pimpinan laporan desa.
           </p>
         </div>
         <button
@@ -264,7 +298,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                 onChange={(e) => setInviteForm({ ...inviteForm, jabatan: e.target.value })}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                {JABATAN_OPTIONS.map((j) => (
+                {jabatanOptions.map((j) => (
                   <option key={j} value={j}>
                     {j}
                   </option>
@@ -282,7 +316,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                 onChange={(e) => setInviteForm({ ...inviteForm, unitKerja: e.target.value })}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                {UNIT_KERJA_OPTIONS.map((u) => (
+                {unitKerjaOptions.map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
@@ -292,7 +326,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
 
             <div className="space-y-1.5">
               <label htmlFor="inv-role" className="block text-xs font-semibold text-slate-700">
-                Peran Awal
+                Peran Akses
               </label>
               <select
                 id="inv-role"
@@ -300,10 +334,29 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                 onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value as UserRole })}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                <option value="perangkat">Perangkat Desa</option>
-                <option value="admin">Admin Desa</option>
+                <option value="perangkat">Pengguna Biasa (Absen &amp; LKH)</option>
+                <option value="admin">Admin Desa (Khusus Manajemen)</option>
               </select>
             </div>
+
+            {inviteForm.role !== 'admin' && (
+              <div className="space-y-1.5">
+                <label htmlFor="inv-emp-status" className="block text-xs font-semibold text-slate-700">
+                  Status Pegawai
+                </label>
+                <select
+                  id="inv-emp-status"
+                  value={inviteForm.statusKepegawaian}
+                  onChange={(e) =>
+                    setInviteForm({ ...inviteForm, statusKepegawaian: e.target.value as EmploymentStatus })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
+                >
+                  <option value="perangkat_desa">Perangkat Desa</option>
+                  <option value="staf_desa">Staf Desa</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -371,18 +424,18 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
               </label>
               <select
                 id="ed-jabatan"
-                value={JABATAN_OPTIONS.includes(editForm.jabatan) ? editForm.jabatan : 'custom'}
+                value={jabatanOptions.includes(editForm.jabatan) ? editForm.jabatan : 'custom'}
                 onChange={(e) => {
                   if (e.target.value !== 'custom') setEditForm({ ...editForm, jabatan: e.target.value });
                 }}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                {JABATAN_OPTIONS.map((j) => (
+                {jabatanOptions.map((j) => (
                   <option key={j} value={j}>
                     {j}
                   </option>
                 ))}
-                {!JABATAN_OPTIONS.includes(editForm.jabatan) && (
+                {!jabatanOptions.includes(editForm.jabatan) && (
                   <option value="custom">{editForm.jabatan}</option>
                 )}
               </select>
@@ -394,18 +447,18 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
               </label>
               <select
                 id="ed-unit"
-                value={UNIT_KERJA_OPTIONS.includes(editForm.unitKerja) ? editForm.unitKerja : 'custom'}
+                value={unitKerjaOptions.includes(editForm.unitKerja) ? editForm.unitKerja : 'custom'}
                 onChange={(e) => {
                   if (e.target.value !== 'custom') setEditForm({ ...editForm, unitKerja: e.target.value });
                 }}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                {UNIT_KERJA_OPTIONS.map((u) => (
+                {unitKerjaOptions.map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
                 ))}
-                {!UNIT_KERJA_OPTIONS.includes(editForm.unitKerja) && (
+                {!unitKerjaOptions.includes(editForm.unitKerja) && (
                   <option value="custom">{editForm.unitKerja}</option>
                 )}
               </select>
@@ -418,8 +471,24 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
               <input
                 id="ed-nip"
                 type="text"
+                maxLength={SCHEMA_LIMITS.nip.max}
                 value={editForm.nip}
                 onChange={(e) => setEditForm({ ...editForm, nip: e.target.value })}
+                className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="ed-phone" className="block text-xs font-semibold text-slate-700">
+                No. Telepon / WhatsApp
+              </label>
+              <input
+                id="ed-phone"
+                type="tel"
+                maxLength={SCHEMA_LIMITS.phone.max}
+                value={editForm.phone}
+                onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                placeholder="Contoh: 081234567890"
                 className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600"
               />
             </div>
@@ -435,10 +504,29 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                 onChange={(e) => setEditForm({ ...editForm, role: e.target.value as UserRole })}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600"
               >
-                <option value="perangkat">Perangkat Desa</option>
-                <option value="admin">Admin Desa</option>
+                <option value="perangkat">Pengguna Biasa (Absen &amp; LKH)</option>
+                <option value="admin">Admin Desa (Khusus Manajemen)</option>
               </select>
             </div>
+
+            {editForm.role !== 'admin' && (
+              <div className="space-y-1.5">
+                <label htmlFor="ed-emp-status" className="block text-xs font-semibold text-slate-700">
+                  Status Pegawai
+                </label>
+                <select
+                  id="ed-emp-status"
+                  value={editForm.statusKepegawaian}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, statusKepegawaian: e.target.value as EmploymentStatus })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
+                >
+                  <option value="perangkat_desa">Perangkat Desa</option>
+                  <option value="staf_desa">Staf Desa</option>
+                </select>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label htmlFor="ed-status" className="block text-xs font-semibold text-slate-700">
@@ -497,6 +585,7 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
                   <th className="py-2.5 px-6">Nama &amp; Email</th>
                   <th className="py-2.5 px-4">Jabatan &amp; Unit</th>
+                  <th className="py-2.5 px-4">Status Pegawai</th>
                   <th className="py-2.5 px-4">NIP / NIAPD</th>
                   <th className="py-2.5 px-4">Peran RBAC</th>
                   <th className="py-2.5 px-4">Status</th>
@@ -514,24 +603,58 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                       <p className="text-xs font-medium text-slate-800">{u.jabatan}</p>
                       <p className="text-xs text-slate-500">{u.unitKerja}</p>
                     </td>
+                    <td className="py-3 px-4">
+                      <EmploymentStatusText statusKepegawaian={u.statusKepegawaian} role={u.role} />
+                    </td>
                     <td className="py-3 px-4 font-mono text-xs text-slate-600 tabular-nums">
                       {u.nip || '—'}
                     </td>
                     <td className="py-3 px-4">
-                      <RoleText role={u.role} />
+                      <RoleText role={u.role} jabatan={u.jabatan} />
                     </td>
                     <td className="py-3 px-4">
                       <AccountStatusText status={u.status} />
                     </td>
                     <td className="py-3 px-6 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openEditUser(u)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        Kelola
-                      </button>
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditUser(u)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Kelola
+                        </button>
+                        {u.uid !== adminProfile.uid && u.email !== BOOTSTRAPPED_ADMIN_EMAIL && (
+                          confirmDeleteUid === u.uid ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteUser(u)}
+                                className="px-2 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg cursor-pointer"
+                              >
+                                Hapus
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteUid(null)}
+                                className="px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteUid(u.uid)}
+                              title="Hapus akun pengguna"
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -554,7 +677,8 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
                   <th className="py-2.5 px-6">Nama &amp; Email</th>
-                  <th className="py-2.5 px-4">Jabatan</th>
+                  <th className="py-2.5 px-4">Jabatan &amp; Unit</th>
+                  <th className="py-2.5 px-4">Status Pegawai</th>
                   <th className="py-2.5 px-4">NIP</th>
                   <th className="py-2.5 px-4">Peran Rencana</th>
                   <th className="py-2.5 px-6 text-right">Hapus</th>
@@ -570,9 +694,12 @@ export function AdminUsersTab({ adminProfile, users, invites, loading }: AdminUs
                     <td className="py-3 px-4 text-xs text-slate-700">
                       {inv.jabatan} · {inv.unitKerja}
                     </td>
+                    <td className="py-3 px-4">
+                      <EmploymentStatusText statusKepegawaian={inv.statusKepegawaian} role={inv.role} />
+                    </td>
                     <td className="py-3 px-4 font-mono text-xs text-slate-600">{inv.nip || '—'}</td>
                     <td className="py-3 px-4">
-                      <RoleText role={inv.role} />
+                      <RoleText role={inv.role} jabatan={inv.jabatan} />
                     </td>
                     <td className="py-3 px-6 text-right">
                       <button

@@ -18,15 +18,19 @@ import {
   ActivityReport,
   AppNotification,
   AttendanceRecord,
+  DEFAULT_VILLAGE_SETTINGS,
+  hasFullAdminAccess,
   NavTab,
   ReminderSchedule,
   UserProfile,
+  VillageSettings,
 } from '../types';
 
 interface NotificationsTabProps {
   profile: UserProfile;
   notifications: AppNotification[];
   schedule: ReminderSchedule;
+  villageSettings?: VillageSettings;
   todayAttendance: AttendanceRecord | undefined;
   todayReports: ActivityReport[];
   onNavigate: (tab: NavTab) => void;
@@ -37,6 +41,7 @@ export function NotificationsTab({
   profile,
   notifications,
   schedule,
+  villageSettings = DEFAULT_VILLAGE_SETTINGS,
   todayAttendance,
   todayReports,
   onNavigate,
@@ -56,12 +61,14 @@ export function NotificationsTab({
     setScheduleForm(schedule);
   }, [schedule]);
 
+  const isFullAdmin = hasFullAdminAccess(profile);
+  const isManagementOnly = profile.role === 'admin';
   const unreadCount = notifications.filter((n) => !n.isRead).length;
   const nowHM = getLocalTimeHM();
   const todayISO = getLocalDateISO();
-  const todaySchedule = getWorkScheduleForDate(todayISO);
+  const todaySchedule = getWorkScheduleForDate(todayISO, villageSettings);
   const effectiveCheckOutTime =
-    todaySchedule.isFriday && schedule.jamAbsenPulang === '16:00'
+    todaySchedule.isFriday && schedule.jamAbsenPulang === villageSettings.jamPulangNormal
       ? todaySchedule.jamPulang
       : schedule.jamAbsenPulang;
 
@@ -112,7 +119,7 @@ export function NotificationsTab({
 
   const handleSaveSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (profile.role !== 'admin') return;
+    if (!isFullAdmin) return;
     setSavingSchedule(true);
     setFeedback(null);
     try {
@@ -271,7 +278,7 @@ export function NotificationsTab({
               <Bell className="w-6 h-6 text-slate-300 mx-auto" />
               <p className="text-sm font-medium text-slate-900">Belum ada notifikasi</p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Pengingat otomatis akan muncul di sini saat memasuki jadwal absensi atau batas laporan, maupun saat laporan Anda diverifikasi Admin.
+                Pengingat otomatis akan muncul di sini saat memasuki jadwal absensi atau batas laporan, maupun saat laporan Anda diberi Penilaian Pimpinan.
               </p>
             </div>
           ) : (
@@ -343,7 +350,9 @@ export function NotificationsTab({
           <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="text-base font-semibold text-slate-900">Jadwal Pengingat Hari Ini</h3>
+                <h3 className="text-base font-semibold text-slate-900">
+                  {isFullAdmin ? 'Jadwal Pengingat Perangkat & Staf' : 'Jadwal Pengingat Hari Ini'}
+                </h3>
                 <p className="text-xs text-slate-500 font-mono tabular-nums">
                   Waktu sekarang: {nowHM} WIB · {schedule.aktif ? 'Jadwal Aktif' : 'Jadwal Dijeda'}
                 </p>
@@ -351,13 +360,29 @@ export function NotificationsTab({
               <Clock className="w-5 h-5 text-teal-700" />
             </div>
 
+            {isManagementOnly ? (
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3">
+                Sebagai akun khusus manajemen Admin Desa, Anda tidak dikirimi pengingat absen atau batas laporan pribadi. Jadwal di bawah ini berlaku otomatis untuk Perangkat Desa dan Staf Desa pada hari Senin–Jumat (Sabtu–Minggu fleksibel).
+              </p>
+            ) : todaySchedule.isWeekend ? (
+              <p className="text-xs text-teal-900 leading-relaxed bg-teal-50 border border-teal-200 rounded-lg p-3">
+                Hari ini akhir pekan (Sabtu/Minggu). Pengingat wajib dijeda, namun Anda tetap dapat mencatat absensi dan membuat laporan kegiatan secara fleksibel jika bertugas.
+              </p>
+            ) : null}
+
             <div className="divide-y divide-slate-100">
               {milestones.map((m) => (
                 <div key={m.label} className="py-3 flex items-center justify-between gap-4">
                   <div>
                     <p className="text-sm font-medium text-slate-900">{m.label}</p>
-                    <p className={`text-xs ${m.done ? 'text-emerald-700' : 'text-slate-500'}`}>
-                      {m.done ? m.doneText : m.pendingText}
+                    <p className={`text-xs ${!isManagementOnly && m.done ? 'text-emerald-700' : 'text-slate-500'}`}>
+                      {isManagementOnly
+                        ? 'Aktif untuk Perangkat & Staf Desa (Sen–Jum)'
+                        : todaySchedule.isWeekend
+                        ? 'Fleksibel (Sabtu / Minggu)'
+                        : m.done
+                        ? m.doneText
+                        : m.pendingText}
                     </p>
                   </div>
                   <span className="font-mono text-sm font-semibold text-slate-900 tabular-nums shrink-0">
@@ -368,15 +393,15 @@ export function NotificationsTab({
             </div>
           </div>
 
-          {profile.role === 'admin' && (
+          {isFullAdmin && (
             <form
               onSubmit={handleSaveSchedule}
               className="bg-white border border-slate-200 rounded-xl p-6 space-y-4"
             >
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-base font-semibold text-slate-900">Pengaturan Jadwal Desa (Admin)</h3>
+                <h3 className="text-base font-semibold text-slate-900">Pengaturan Jadwal Desa (Admin &amp; Sekdes)</h3>
                 <p className="text-xs text-slate-500">
-                  Jam reguler: Sen–Kam 07:30–16:00 (istirahat 12:00–13:00), Jumat pulang 16:30 (istirahat 11:30–13:00).
+                  Absen masuk tepat waktu 05:30–08:00 WIB (pulang maksimal 21:00 WIB) &amp; pengisian laporan harian 15:00–21:00 WIB sesuai tanggal hari ini. Reguler Sen–Kam pulang {villageSettings.jamPulangNormal}, Jumat pulang {villageSettings.jamPulangJumat}, Sabtu &amp; Minggu fleksibel.
                 </p>
               </div>
 

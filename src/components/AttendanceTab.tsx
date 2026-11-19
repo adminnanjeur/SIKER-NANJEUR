@@ -11,39 +11,64 @@ import {
   getLocalMonthISO,
   getLocalTimeHM,
   getWorkScheduleForDate,
+  isAttendanceOnTime,
+  isWithinAttendanceWindow,
 } from '../lib/dateUtils';
 import { formatDistanceMeters, GeoPositionResult, getDevicePosition } from '../lib/geoUtils';
 import {
+  ATTENDANCE_TIME_WINDOW,
   AttendanceRecord,
   AttendanceStatus,
+  DEFAULT_VILLAGE_SETTINGS,
   PunctualityStatus,
   SCHEMA_LIMITS,
   UserProfile,
-  VILLAGE_INFO,
+  VillageSettings,
 } from '../types';
 import { AttendanceStatusText, PunctualityText } from './StatusText';
 
 interface AttendanceTabProps {
   profile: UserProfile;
   records: AttendanceRecord[];
+  villageSettings?: VillageSettings;
   loading: boolean;
 }
 
-export function AttendanceTab({ profile, records, loading }: AttendanceTabProps) {
-  const todayISO = getLocalDateISO();
+export function AttendanceTab({
+  profile,
+  records,
+  villageSettings = DEFAULT_VILLAGE_SETTINGS,
+  loading,
+}: AttendanceTabProps) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const todayISO = getLocalDateISO(now);
+  const currentHM = getLocalTimeHM(now);
+  const isBeforeOpen = currentHM < ATTENDANCE_TIME_WINDOW.start;
+  const isAfterMaxClose = currentHM > ATTENDANCE_TIME_WINDOW.maxEnd;
+  const isAttendanceOpen = isWithinAttendanceWindow(currentHM);
+  const isOnTimeNow = isAttendanceOnTime(currentHM);
+
   const todayRecord = records.find((r) => r.tanggal === todayISO);
-  const todaySchedule = getWorkScheduleForDate(todayISO);
+  const todaySchedule = getWorkScheduleForDate(todayISO, villageSettings);
 
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthISO());
   const [statusFilter, setStatusFilter] = useState<'all' | AttendanceStatus>('all');
 
   // Check-in form state
   const [status, setStatus] = useState<AttendanceStatus>('hadir');
-  const [lokasi, setLokasi] = useState<string>(VILLAGE_INFO.alamatKantor);
+  const [lokasi, setLokasi] = useState<string>(villageSettings.alamatKantor);
   const [catatan, setCatatan] = useState<string>('');
 
   // Check-out / notes update state
-  const [lokasiPulang, setLokasiPulang] = useState<string>(VILLAGE_INFO.alamatKantor);
+  const [lokasiPulang, setLokasiPulang] = useState<string>(villageSettings.alamatKantor);
   const [catatanUpdate, setCatatanUpdate] = useState<string>('');
 
   // Geofence GPS state
@@ -59,9 +84,9 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
     setGeoError(null);
     try {
       const pos = await getDevicePosition(
-        VILLAGE_INFO.officeLat,
-        VILLAGE_INFO.officeLng,
-        VILLAGE_INFO.attendanceRadiusMeters
+        villageSettings.officeLat,
+        villageSettings.officeLng,
+        villageSettings.attendanceRadiusMeters
       );
       setGeoResult(pos);
       const formattedLoc = `${
@@ -83,7 +108,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
     } finally {
       setGeoLoading(false);
     }
-  }, []);
+  }, [villageSettings.officeLat, villageSettings.officeLng, villageSettings.attendanceRadiusMeters]);
 
   // Automatically probe GPS on mount when office attendance check-in/out is active
   useEffect(() => {
@@ -99,6 +124,26 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
     e.preventDefault();
     if (profile.status !== 'aktif') {
       setFeedback({ type: 'error', text: 'Akun Anda sedang nonaktif. Hubungi Admin Desa.' });
+      return;
+    }
+
+    const checkNow = new Date();
+    const checkHM = getLocalTimeHM(checkNow);
+    const checkTodayISO = getLocalDateISO(checkNow);
+
+    if (checkHM < ATTENDANCE_TIME_WINDOW.start) {
+      setFeedback({
+        type: 'error',
+        text: `Absensi masuk baru dibuka mulai pukul ${ATTENDANCE_TIME_WINDOW.start} WIB (waktu saat ini: ${checkHM} WIB).`,
+      });
+      return;
+    }
+
+    if (checkHM > ATTENDANCE_TIME_WINDOW.maxEnd) {
+      setFeedback({
+        type: 'error',
+        text: `Batas waktu absensi harian maksimal pukul ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB telah berakhir (waktu saat ini: ${checkHM} WIB).`,
+      });
       return;
     }
 
@@ -121,7 +166,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
       if (!freshPos.withinRadius) {
         setFeedback({
           type: 'error',
-          text: `Absen ditolak: lokasi Anda berjarak ${formatDistanceMeters(freshPos.distanceMeters)} dari Kantor Desa (batas radius maksimal ${VILLAGE_INFO.attendanceRadiusMeters} m). Gunakan status "Dinas Luar" jika bertugas di luar kantor.`,
+          text: `Absen ditolak: lokasi Anda berjarak ${formatDistanceMeters(freshPos.distanceMeters)} dari Kantor Desa (batas radius maksimal ${villageSettings.attendanceRadiusMeters} m). Gunakan status "Dinas Luar" jika bertugas di luar kantor.`,
         });
         setSubmitting(false);
         return;
@@ -131,16 +176,25 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
       )} m)`.slice(0, SCHEMA_LIMITS.lokasiOptional.max);
     }
 
-    const nowHM = getLocalTimeHM();
+    const submitHM = getLocalTimeHM(new Date());
+    if (!isWithinAttendanceWindow(submitHM)) {
+      setFeedback({
+        type: 'error',
+        text: `Absensi hanya dapat dicatat pada pukul ${ATTENDANCE_TIME_WINDOW.start} – ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB (waktu saat ini: ${submitHM} WIB).`,
+      });
+      setSubmitting(false);
+      return;
+    }
+
     const isLeave = status === 'izin' || status === 'sakit';
-    const jamMasuk = isLeave ? '' : nowHM;
+    const jamMasuk = isLeave ? '' : submitHM;
     const ketepatan: PunctualityStatus = isLeave
       ? 'izin_resmi'
-      : jamMasuk <= VILLAGE_INFO.jamMasukBatas
+      : isAttendanceOnTime(jamMasuk)
       ? 'tepat_waktu'
       : 'terlambat';
 
-    const docId = `${profile.uid}_${todayISO}`;
+    const docId = `${profile.uid}_${checkTodayISO}`;
     const docPath = `attendance/${docId}`;
 
     const safeName = profile.displayName.trim().slice(0, SCHEMA_LIMITS.displayName.max) || 'Perangkat Desa';
@@ -152,7 +206,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
         userId: profile.uid,
         userName: safeName,
         userJabatan: safeJabatan,
-        tanggal: todayISO,
+        tanggal: checkTodayISO,
         status,
         jamMasuk,
         jamPulang: '',
@@ -180,6 +234,16 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
   const handleCheckOut = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!todayRecord) return;
+
+    const checkHM = getLocalTimeHM(new Date());
+    if (!isWithinAttendanceWindow(checkHM)) {
+      setFeedback({
+        type: 'error',
+        text: `Absen pulang maksimal pukul ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB (waktu saat ini: ${checkHM} WIB).`,
+      });
+      return;
+    }
+
     setSubmitting(true);
     setFeedback(null);
 
@@ -201,7 +265,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
           type: 'error',
           text: `Absen pulang ditolak: lokasi Anda berjarak ${formatDistanceMeters(
             freshPos.distanceMeters
-          )} dari Kantor Desa (batas radius ${VILLAGE_INFO.attendanceRadiusMeters} m).`,
+          )} dari Kantor Desa (batas radius ${villageSettings.attendanceRadiusMeters} m).`,
         });
         setSubmitting(false);
         return;
@@ -211,20 +275,29 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
       )} m)`.slice(0, SCHEMA_LIMITS.lokasiOptional.max);
     }
 
-    const nowHM = getLocalTimeHM();
+    const submitHM = getLocalTimeHM(new Date());
+    if (!isWithinAttendanceWindow(submitHM)) {
+      setFeedback({
+        type: 'error',
+        text: `Absen pulang maksimal pukul ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB (waktu saat ini: ${submitHM} WIB).`,
+      });
+      setSubmitting(false);
+      return;
+    }
+
     const docPath = `attendance/${todayRecord.id}`;
     const mergedCatatan = (catatanUpdate.trim() || todayRecord.catatan).slice(0, SCHEMA_LIMITS.catatan.max);
 
     try {
       await updateDoc(doc(db, 'attendance', todayRecord.id), {
-        jamPulang: nowHM,
+        jamPulang: submitHM,
         lokasiPulang: safeLokasiPulang,
         catatan: mergedCatatan,
         updatedAt: serverTimestamp(),
       });
       setFeedback({
         type: 'success',
-        text: `Absen pulang berhasil dicatat pada pukul ${nowHM} WIB.`,
+        text: `Absen pulang berhasil dicatat pada pukul ${submitHM} WIB.`,
       });
       setCatatanUpdate('');
     } catch (error) {
@@ -265,7 +338,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0" />
           <p className="text-xs font-semibold text-slate-900">
-            Validasi Radius Kantor Desa ({VILLAGE_INFO.attendanceRadiusMeters} Meter)
+            Validasi Radius Kantor Desa ({villageSettings.attendanceRadiusMeters} Meter)
           </p>
         </div>
         <button
@@ -280,8 +353,8 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
       </div>
 
       <p className="text-xs text-slate-500 font-mono tabular-nums">
-        Titik Kantor: {VILLAGE_INFO.officeLat.toFixed(6)}, {VILLAGE_INFO.officeLng.toFixed(6)} · Maks Radius:{' '}
-        {VILLAGE_INFO.attendanceRadiusMeters} m
+        Titik Kantor: {villageSettings.officeLat.toFixed(6)}, {villageSettings.officeLng.toFixed(6)} · Maks Radius:{' '}
+        {villageSettings.attendanceRadiusMeters} m
       </p>
 
       {geoResult ? (
@@ -297,7 +370,7 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
           ) : (
             <span className="inline-flex items-center gap-1.5 font-semibold text-red-700">
               <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-              Jarak {formatDistanceMeters(geoResult.distanceMeters)} · Di Luar Radius {VILLAGE_INFO.attendanceRadiusMeters} m
+              Jarak {formatDistanceMeters(geoResult.distanceMeters)} · Di Luar Radius {villageSettings.attendanceRadiusMeters} m
             </span>
           )}
         </div>
@@ -322,14 +395,50 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
           </div>
           <div className="text-right space-y-0.5">
             <p className="text-xs font-mono text-slate-700 tabular-nums">
-              Hari Ini: {todaySchedule.jamMasuk} – {todaySchedule.jamPulang} WIB (Istirahat{' '}
-              {todaySchedule.istirahatMulai}–{todaySchedule.istirahatSelesai})
+              Masuk Tepat Waktu: {ATTENDANCE_TIME_WINDOW.start} – {ATTENDANCE_TIME_WINDOW.onTimeEnd} WIB · Pulang Maks:{' '}
+              {ATTENDANCE_TIME_WINDOW.maxEnd} WIB
             </p>
             <p className="text-xs text-slate-500">
-              Sen–Kam: 07:30–12:00 &amp; 13:00–16:00 · Jumat: 07:30–11:30 &amp; 13:00–16:30 · Radius:{' '}
-              {VILLAGE_INFO.attendanceRadiusMeters} m
+              {todaySchedule.isWeekend
+                ? 'Akhir Pekan (Sabtu/Minggu) Fleksibel'
+                : `Jam Kerja Reguler: ${todaySchedule.jamMasuk}–${todaySchedule.jamPulang} (Istirahat ${todaySchedule.istirahatMulai}–${todaySchedule.istirahatSelesai})`}
+              {' · '}Radius: {villageSettings.attendanceRadiusMeters} m
             </p>
           </div>
+        </div>
+
+        <div
+          className={`p-3.5 rounded-lg border text-xs flex flex-wrap items-center justify-between gap-2 ${
+            !isAttendanceOpen
+              ? 'bg-red-50 border-red-200 text-red-900'
+              : isOnTimeNow
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+        >
+          <div>
+            <span className="font-semibold">
+              {isBeforeOpen
+                ? `Absensi Belum Dibuka (Saat ini ${currentHM} WIB)`
+                : isAfterMaxClose
+                ? `Batas Absensi Harian Berakhir (Saat ini ${currentHM} WIB)`
+                : isOnTimeNow
+                ? `Jendela Masuk Tepat Waktu Aktif (Saat ini ${currentHM} WIB)`
+                : `Lewat Batas Tepat Waktu Masuk (Saat ini ${currentHM} WIB)`}
+            </span>
+            <span className="ml-1.5">
+              {isBeforeOpen
+                ? `— Absensi masuk dibuka mulai pukul ${ATTENDANCE_TIME_WINDOW.start} WIB.`
+                : isAfterMaxClose
+                ? `— Absen masuk maupun pulang maksimal pukul ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB.`
+                : isOnTimeNow
+                ? `— Absen pukul ${ATTENDANCE_TIME_WINDOW.start}–${ATTENDANCE_TIME_WINDOW.onTimeEnd} WIB tercatat Tepat Waktu.`
+                : `— Absen masuk setelah pukul ${ATTENDANCE_TIME_WINDOW.onTimeEnd} WIB tercatat Terlambat. Absen pulang dibuka hingga ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB.`}
+            </span>
+          </div>
+          {todaySchedule.isWeekend && (
+            <span className="font-semibold text-teal-800">Sabtu / Minggu Fleksibel</span>
+          )}
         </div>
 
         {feedback && (
@@ -436,11 +545,15 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={submitting || (status === 'hadir' && geoLoading)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                disabled={submitting || !isAttendanceOpen || (status === 'hadir' && geoLoading)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
               >
                 <Clock className="w-4 h-4" />
-                {submitting
+                {!isAttendanceOpen
+                  ? isBeforeOpen
+                    ? `Dibuka Pukul ${ATTENDANCE_TIME_WINDOW.start} WIB`
+                    : `Tutup (Maks ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB)`
+                  : submitting
                   ? 'Memvalidasi & Menyimpan...'
                   : status === 'izin' || status === 'sakit'
                   ? 'Kirim Keterangan Tidak Hadir'
@@ -527,11 +640,15 @@ export function AttendanceTab({ profile, records, loading }: AttendanceTabProps)
                 <div className="flex justify-end">
                   <button
                     type="submit"
-                    disabled={submitting}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                    disabled={submitting || !isAttendanceOpen}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
                   >
                     <Clock className="w-4 h-4" />
-                    {submitting ? 'Memvalidasi & Menyimpan...' : 'Catat Absen Pulang Sekarang'}
+                    {!isAttendanceOpen
+                      ? `Absen Pulang Maks ${ATTENDANCE_TIME_WINDOW.maxEnd} WIB`
+                      : submitting
+                      ? 'Memvalidasi & Menyimpan...'
+                      : 'Catat Absen Pulang Sekarang'}
                   </button>
                 </div>
               </form>

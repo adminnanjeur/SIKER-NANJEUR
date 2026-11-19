@@ -1,3 +1,9 @@
+import {
+  ATTENDANCE_TIME_WINDOW,
+  DAILY_REPORT_TIME_WINDOW,
+  type VillageSettings,
+} from '../types';
+
 export function getLocalDateISO(date: Date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -103,34 +109,99 @@ export interface DailyWorkSchedule {
   summaryLabel: string;
 }
 
-export function getWorkScheduleForDate(isoDate: string = getLocalDateISO()): DailyWorkSchedule {
+export function getWorkScheduleForDate(
+  isoDate: string = getLocalDateISO(),
+  settings?: VillageSettings
+): DailyWorkSchedule {
   let day = new Date().getDay();
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
     const [y, m, d] = isoDate.split('-').map(Number);
     day = new Date(y, m - 1, d).getDay();
   }
 
+  const jamMasuk = settings?.jamMasukBatas || ATTENDANCE_TIME_WINDOW.onTimeEnd;
+
   if (day === 5) {
+    const istirahatMulai = settings?.jamIstirahatMulaiJumat || '11:30';
+    const istirahatSelesai = settings?.jamIstirahatSelesaiJumat || '13:00';
+    const jamPulang = settings?.jamPulangJumat || '16:30';
     return {
       isFriday: true,
       isWeekend: false,
       dayGroupLabel: 'Jadwal Hari Jumat',
-      jamMasuk: '07:30',
-      istirahatMulai: '11:30',
-      istirahatSelesai: '13:00',
-      jamPulang: '16:30',
-      summaryLabel: '07:30 – 16:30 WIB (Istirahat 11:30 – 13:00)',
+      jamMasuk,
+      istirahatMulai,
+      istirahatSelesai,
+      jamPulang,
+      summaryLabel: `${jamMasuk} – ${jamPulang} WIB (Istirahat ${istirahatMulai} – ${istirahatSelesai})`,
     };
   }
+
+  const istirahatMulai = settings?.jamIstirahatMulaiNormal || '12:00';
+  const istirahatSelesai = settings?.jamIstirahatSelesaiNormal || '13:00';
+  const jamPulang = settings?.jamPulangNormal || '16:00';
 
   return {
     isFriday: false,
     isWeekend: day === 0 || day === 6,
-    dayGroupLabel: day === 0 || day === 6 ? 'Akhir Pekan' : 'Jadwal Senin – Kamis',
-    jamMasuk: '07:30',
-    istirahatMulai: '12:00',
-    istirahatSelesai: '13:00',
-    jamPulang: '16:00',
-    summaryLabel: '07:30 – 16:00 WIB (Istirahat 12:00 – 13:00)',
+    dayGroupLabel: day === 0 || day === 6 ? 'Sabtu / Minggu (Fleksibel)' : 'Jadwal Senin – Kamis',
+    jamMasuk,
+    istirahatMulai,
+    istirahatSelesai,
+    jamPulang,
+    summaryLabel: `${jamMasuk} – ${jamPulang} WIB (Istirahat ${istirahatMulai} – ${istirahatSelesai})`,
   };
+}
+
+export interface WeekRangeMonToSun {
+  startISO: string;
+  endISO: string;
+  label: string;
+}
+
+export function getWeekRangeMonToSun(isoDate: string = getLocalDateISO()): WeekRangeMonToSun {
+  let base = new Date();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [y, m, d] = isoDate.split('-').map(Number);
+    base = new Date(y, m - 1, d);
+  }
+  const day = base.getDay(); // 0=Minggu, 1=Senin, ..., 6=Sabtu
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(base.getFullYear(), base.getMonth(), base.getDate() + diffToMonday);
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  const startISO = getLocalDateISO(monday);
+  const endISO = getLocalDateISO(sunday);
+  return {
+    startISO,
+    endISO,
+    label: `${formatTanggalIndonesia(startISO)} s/d ${formatTanggalIndonesia(endISO)}`,
+  };
+}
+
+export function isOutsideWorkSchedule(
+  isoDate: string,
+  waktuMulai: string,
+  waktuSelesai: string,
+  settings?: VillageSettings
+): { isWeekend: boolean; isOutsideHours: boolean } {
+  const schedule = getWorkScheduleForDate(isoDate, settings);
+  if (schedule.isWeekend) {
+    return { isWeekend: true, isOutsideHours: true };
+  }
+  const outside =
+    Boolean(waktuMulai && waktuMulai < schedule.jamMasuk) ||
+    Boolean(waktuSelesai && waktuSelesai > schedule.jamPulang);
+  return { isWeekend: false, isOutsideHours: outside };
+}
+
+export function isWithinAttendanceWindow(hm: string): boolean {
+  return hm >= ATTENDANCE_TIME_WINDOW.start && hm <= ATTENDANCE_TIME_WINDOW.maxEnd;
+}
+
+export function isAttendanceOnTime(hm: string): boolean {
+  return hm >= ATTENDANCE_TIME_WINDOW.start && hm <= ATTENDANCE_TIME_WINDOW.onTimeEnd;
+}
+
+export function isWithinDailyReportWindow(hm: string): boolean {
+  return hm >= DAILY_REPORT_TIME_WINDOW.start && hm <= DAILY_REPORT_TIME_WINDOW.end;
 }
