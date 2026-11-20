@@ -123,6 +123,18 @@ export interface AttendanceRecord {
   updatedAt: unknown;
 }
 
+export interface AttendancePhotoRecord {
+  id: string;
+  userId: string;
+  tanggal: string;
+  fotoMasuk: string;
+  fotoPulang: string;
+  waktuFotoMasuk: string;
+  waktuFotoPulang: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
 export interface ActivityReport {
   id: string;
   userId: string;
@@ -314,6 +326,7 @@ export const SCHEMA_LIMITS = {
   keteranganTugas: { min: 0, max: 150 },
   notifTitle: { min: 3, max: 120 },
   notifMessage: { min: 5, max: 500 },
+  fotoDataUrl: { min: 0, max: 90000 },
 } as const;
 
 export const DEFAULT_VILLAGE_SETTINGS: VillageSettings = {
